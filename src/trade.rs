@@ -96,7 +96,9 @@ impl TradeManager {
         self.trades.contains(trade_id)
     }
     pub fn insert(&self, trade_id: Cow<'static, str>, trade: Trade)-> Result<()> {
-        self.tree.insert(trade_id.as_bytes(), rmp_serde::to_vec(&trade).unwrap())?;
+        if !self.tree.contains_key(trade_id.as_bytes())? {
+            self.tree.insert(trade_id.as_bytes(), rmp_serde::to_vec(&trade).unwrap())?;
+        }
         let _ = self.trades.insert(trade_id, trade);
         Ok(())
     }

@@ -14,7 +14,13 @@ use trade::{TRADES, get_trades, get_amount};
 use anyhow::Result;
 
 fn main()-> Result<()> {
-    TRADES.load().unwrap();
+    TRADES.load().unwrap();         //重启的时候加载所有的交易记录，注意 我们不处理没有终态的记录，这样可以保证数据的一致性，
+
+    /*      从老的数据库迁移，只需要 读取所有已经完成的交易(成功的) 然后使用 add_trade 写入数据库就可以
+            
+            add_trade(Cow::from(key), trade);
+
+     */
 
     let mut total = (0, 0);
     for i in 0..ADDRS.len() {
