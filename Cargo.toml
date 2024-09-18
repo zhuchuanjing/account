@@ -12,3 +12,5 @@ snowflaker = "0.3.6"
 sled = "0.34.7"
 rmp-serde = "1.1.2"
 serde = { version = "1.0", features = ["derive"] }
+fern = "0.6.2"
+log = "0.4.20"
