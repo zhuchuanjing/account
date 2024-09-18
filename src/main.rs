@@ -27,6 +27,7 @@ fn main()-> Result<()> {
         }).level(log::LevelFilter::Info).chain(fern::log_file("account.log")?).apply()?;
     
     TRADES.load().unwrap();         //重启的时候加载所有的交易记录，注意 我们不处理没有终态的记录，这样可以保证数据的一致性，
+    let now = std::time::Instant::now();
 
     /*      从老的数据库迁移，只需要 读取所有已经完成的交易(成功的) 然后使用 add_trade 写入数据库就可以
             for trade in [all success trade] {
@@ -69,7 +70,7 @@ fn main()-> Result<()> {
         println!("charge {}", charge);
     });
 
-    std::thread::spawn(|| {
+    std::thread::spawn(move || {
         let mut trans = 0;
         for id in 0..100 {
             let mut tids = Vec::new();
@@ -77,7 +78,7 @@ fn main()-> Result<()> {
                 let tid = Cow::from(snowflaker::next_id_string().unwrap());
                 let from = Cow::from(ADDRS[i].clone());
                 let to = Cow::from(ADDRS[200 + i].clone());
-                trade::add_transfer(tid.clone(), from, to, 100, 10, 10).unwrap();
+                let _ = trade::add_transfer(tid.clone(), from, to, 100, 10, 10).map_err(|e| log::error!("{:?}", e));
                 std::thread::sleep(std::time::Duration::from_millis(1));
                 tids.push(tid);
             }
@@ -97,6 +98,8 @@ fn main()-> Result<()> {
             //println!("transfer count {}", id);
         }
         println!("transfer {}", trans);
+        let elaspe = std::time::Instant::now().duration_since(now);
+        println!("{:?}", elaspe);
     });
     
     std::thread::spawn(|| {
@@ -121,7 +124,7 @@ fn main()-> Result<()> {
         println!("withdraw {}", withdraw);
     });
 
-    for _ in 0..10 {
+    for _ in 0..20 {
         let mut total = (0, 0);
         for i in 0..ADDRS.len() {
             get_trades(ADDRS[i].clone());
