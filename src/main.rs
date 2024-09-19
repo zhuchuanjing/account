@@ -27,7 +27,7 @@ fn main()-> Result<()> {
         }).level(log::LevelFilter::Info).chain(fern::log_file("account.log")?).apply()?;
     
     TRADES.load(|trade| {
-        if trade.status != Status::Fail as u8 {      //重启的时候加载所有的交易记录，注意 失败的不需要加载, 没有终态的 最好单独处理
+        if trade.status == Status::Success as u8 {      //重启的时候加载成功的交易记录 进行中的最好重新提交
             true
         } else {
             false
