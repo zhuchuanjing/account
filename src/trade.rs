@@ -10,8 +10,7 @@ const TRADE_WITHDRAW: u8 = 3;
 
 #[derive(Clone, Debug)]
 pub enum Status {
-    Idle = 0,
-    Processing,
+    Start,
     Fail,
     Success
 }
@@ -30,41 +29,32 @@ pub struct Trade {
 }
 
 impl Trade {
-    fn modify(&mut self, r#type: u8, prev: Status, next: Status)-> bool {
-        if self.r#type == r#type && self.status == prev as u8 { 
-            self.status = next as u8;
+    pub fn modify(&mut self, success: bool)-> bool {
+        if self.status == Status::Start as u8 { 
+            self.status = if success { Status::Success as u8 } else { Status::Fail as u8 };
             self.update_tick = chrono::Utc::now().timestamp();
             true
         } else { false }
+    }
+    pub fn success(&mut self)-> bool {
+        self.modify(true)
+    }
+    fn fail(&mut self)-> bool {
+        self.modify(false)
     }
 }
 
 impl Trade {
     pub fn charge(from: Cow<'static, str>, to: Cow<'static, str>, amount: u64, gas: u64, fee: u64)-> Self {
-        Self{r#type: TRADE_CHARGE, status: Status::Processing as u8, create_tick: chrono::Utc::now().timestamp(), update_tick: 0, amount, gas, fee, from, to}
-    }
-    pub fn complete_charge(&mut self, success: bool)-> bool {
-        if success { self.modify(TRADE_CHARGE, Status::Processing, Status::Success) }
-        else { self.modify(TRADE_CHARGE, Status::Processing, Status::Fail) }
+        Self{r#type: TRADE_CHARGE, status: Status::Start as u8, create_tick: chrono::Utc::now().timestamp(), update_tick: 0, amount, gas, fee, from, to}
     }
 
     pub fn transfer(from: Cow<'static, str>, to: Cow<'static, str>, amount: u64, gas: u64, fee: u64)-> Self {
-        Self{r#type: TRADE_TRANSFER, status: Status::Idle as u8, create_tick: chrono::Utc::now().timestamp(), update_tick: 0, amount, gas, fee, from, to}
-    }
-    pub fn start_transfer(&mut self)-> bool {
-        self.modify(TRADE_TRANSFER, Status::Idle, Status::Processing)
-    }
-    pub fn complete_transfer(&mut self, success: bool)-> bool {
-        if success { self.modify(TRADE_TRANSFER, Status::Processing, Status::Success) }
-        else { self.modify(TRADE_TRANSFER, Status::Processing, Status::Fail) }
+        Self{r#type: TRADE_TRANSFER, status: Status::Start as u8, create_tick: chrono::Utc::now().timestamp(), update_tick: 0, amount, gas, fee, from, to}
     }
 
     pub fn with_draw(from: Cow<'static, str>, to: Cow<'static, str>, amount: u64, gas: u64, fee: u64)-> Self {
-        Self{r#type: TRADE_WITHDRAW, status: Status::Processing as u8, create_tick: chrono::Utc::now().timestamp(), update_tick: 0, amount, gas, fee, from, to}
-    }
-    pub fn complete_withdraw(&mut self, success: bool)-> bool {
-        if success { self.modify(TRADE_WITHDRAW, Status::Processing, Status::Success) }
-        else { self.modify(TRADE_WITHDRAW, Status::Processing, Status::Fail) }
+        Self{r#type: TRADE_WITHDRAW, status: Status::Start as u8, create_tick: chrono::Utc::now().timestamp(), update_tick: 0, amount, gas, fee, from, to}
     }
 }
 
@@ -140,15 +130,31 @@ impl Default for Account {
     }
 }
 
+impl Account {
+    pub fn lock(&mut self, amount: u64)-> bool {
+        if self.amount >= amount {
+            self.amount -= amount;
+            self.locked += amount;
+            true
+        } else { false }
+    }
+    pub fn confirm(&mut self, amount: u64) {
+        self.locked -= amount;
+    }
+    pub fn rollback(&mut self, amount: u64) {
+        self.locked -= amount;
+        self.amount += amount;
+    }
+}
+
 use once_cell::sync::Lazy;
 use std::sync::Arc;
 static ACCOUNTS: Lazy<Arc<HashMap<Cow<'static, str>, Account>>> = Lazy::new(|| Arc::new(HashMap::default()) );
 
-fn add_with_create(account: Cow<'static, str>, trade_id: Cow<'static, str>, amount: u64) {
+fn add_with_create(account: Cow<'static, str>, trade_id: Cow<'static, str>) {
     ACCOUNTS.entry(account).and_modify(|account| {
         account.trades.push(trade_id.clone());
-        account.amount += amount;
-    }).or_insert(Account{amount: amount, locked: 0, trades: vec![trade_id]});
+    }).or_insert(Account{amount: 0, locked: 0, trades: vec![trade_id]});
 }
 
 pub fn get_amount(account: Cow<'static, str>)-> Option<(u64, u64)>{
@@ -172,12 +178,12 @@ pub fn add_charge(trade_id: Cow<'static, str>, from: Cow<'static, str>, to: Cow<
     if TRADES.contains(&trade_id) { return Err(anyhow!("trade {} existed", trade_id )); }
     let trade = Trade::charge(from, to.clone(), amount, gas, fee);
     let _ = TRADES.insert(trade_id.clone(), trade.clone());
-    add_with_create(to, trade_id, 0);                       //目标充值地址可能不存在 需要创建
+    add_with_create(to, trade_id);                       //目标充值地址可能不存在 需要创建
     Ok(())
 }
 
 pub fn complete_charge(trade_id: Cow<'static, str>, success: bool)-> bool {
-    if let Some(old) = TRADES.update(trade_id, |mut trade| if trade.complete_charge(success) { Some(trade) } else { None } ) {      //update success
+    if let Some(old) = TRADES.update(trade_id, |mut trade| if trade.success() { Some(trade) } else { None } ) {      //update success
         ACCOUNTS.update(&old.to, |_, account| { 
             if success { account.amount += old.amount; }
         }).is_some()
@@ -188,34 +194,25 @@ pub fn complete_charge(trade_id: Cow<'static, str>, success: bool)-> bool {
 pub fn add_transfer(trade_id: Cow<'static, str>, from: Cow<'static, str>, to: Cow<'static, str>, amount: u64, gas: u64, fee: u64)-> Result<()> {
     if TRADES.contains(&trade_id) { return Err(anyhow!("trade {} existed", trade_id )); }
     if !ACCOUNTS.update(&from, |_, account| {
-        if account.amount < amount { false }
-        else {
-            account.amount -= amount;
-            account.locked += amount;
+        if account.lock(amount) {
             account.trades.push(trade_id.clone());
             true
-        }
+        } else { false }
     }).ok_or(anyhow!("no account {}", from))? { return Err(anyhow!("{} have no enough amount", from)); }
-    add_with_create(to.clone(), trade_id.clone(), 0);   //目标转账地址可能不存在 需要创建
+    add_with_create(to.clone(), trade_id.clone());   //目标转账地址可能不存在 需要创建
     let trade = Trade::transfer(from, to, amount, gas, fee);
     let _ = TRADES.insert(trade_id, trade);
     Ok(())
 }
 
-pub fn start_transfer(trade_id: Cow<'static, str>)-> bool {
-    TRADES.update(trade_id, |mut trade| if trade.start_transfer() { Some(trade) } else { None } ).is_some()
-}
 
 pub fn complete_transfer(trade_id: Cow<'static, str>, success: bool)-> bool {
-    if let Some(old) = TRADES.update(trade_id, |mut trade| if trade.complete_transfer(success) { Some(trade) } else { None } ) {
+    if let Some(old) = TRADES.update(trade_id, |mut trade| if trade.modify(success) { Some(trade) } else { None } ) {
         if success {
-            ACCOUNTS.update(&old.from, |_, account| account.locked -= old.amount );
+            ACCOUNTS.update(&old.from, |_, account| account.confirm(old.amount) );
             ACCOUNTS.update(&old.to, |_, account| account.amount += old.amount );
         } else {
-            ACCOUNTS.update(&old.from, |_, account| {
-                account.locked -= old.amount;
-                account.amount += old.amount;
-            });
+            ACCOUNTS.update(&old.from, |_, account| account.rollback(old.amount) );
         }
         true
     } else {
@@ -226,12 +223,10 @@ pub fn complete_transfer(trade_id: Cow<'static, str>, success: bool)-> bool {
 pub fn add_withdraw(trade_id: Cow<'static, str>, from: Cow<'static, str>, to: Cow<'static, str>, amount: u64, gas: u64, fee: u64)-> Result<()> {
     if TRADES.contains(&trade_id) { return Err(anyhow!("trade {} existed", trade_id )); }
     if !ACCOUNTS.update(&from, |_, account| {
-        if account.amount < amount { false }
-        else {
-            account.amount -= amount;
+        if account.lock(amount) {
             account.trades.push(trade_id.clone());
             true
-        }
+        } else { false }
     }).ok_or(anyhow!("no account {}", from))? {
         return Err(anyhow!("{} have no enough amount", from));
     }
@@ -242,10 +237,8 @@ pub fn add_withdraw(trade_id: Cow<'static, str>, from: Cow<'static, str>, to: Co
 
 pub fn complete_withdraw(trade_id: Cow<'static, str>, success: bool)-> bool {
     if let Some(old) = TRADES.update(trade_id, |mut trade| {
-        if trade.complete_withdraw(success) { Some(trade) } else { None } }) {
-        if !success {
-            ACCOUNTS.update(&old.from, |_, account| account.amount += old.amount );
-        }
+        if trade.modify(success) { Some(trade) } else { None } }) {
+        ACCOUNTS.update(&old.from, |_, account| if success { account.confirm(old.amount) } else { account.rollback(old.amount) } );
         true
     } else {
         false
@@ -255,14 +248,19 @@ pub fn complete_withdraw(trade_id: Cow<'static, str>, success: bool)-> bool {
 pub fn add_trade(trade_id: Cow<'static, str>, trade: Trade) {           //加载初始化的数据, 
     match trade.r#type {
         TRADE_CHARGE=> {
-            add_with_create(trade.to.clone(), trade_id.clone(), trade.amount);
+            add_with_create(trade.to.clone(), trade_id.clone());
+            if trade.status == Status::Success as u8 {
+                ACCOUNTS.update(&trade.to, |_, account| { account.amount += trade.amount } );
+            }
         }
         TRADE_TRANSFER=> {
+            add_with_create(trade.to.clone(), trade_id.clone());
             ACCOUNTS.update(&trade.from, |_, account| {
                 account.trades.push(trade_id.clone());
-                account.amount -= trade.amount;
+                if trade.status == Status::Success as u8 {
+                    account.amount -= trade.amount;
+                }
             });
-            add_with_create(trade.to.clone(), trade_id.clone(), trade.amount);
         }
         TRADE_WITHDRAW=> {
             ACCOUNTS.update(&trade.from, |_, account| {
