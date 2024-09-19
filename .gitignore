@@ -1,3 +1,4 @@
 sled/*
 Cargo.lock
 target/*
+*.log
