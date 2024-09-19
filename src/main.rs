@@ -39,7 +39,7 @@ fn main()-> Result<()> {
                 add_trade(trade_id, trade_info);
             }
      */
-
+    let now = std::time::Instant::now();
     let mut total = (0, 0);
     for i in 0..ADDRS.len() {
         get_trades(ADDRS[i].clone());
