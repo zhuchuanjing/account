@@ -18,15 +18,15 @@ pub enum Status {
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Trade {
-    r#type: u8,
-    status: u8,
-    create_tick: i64,
-    update_tick: i64,
-    amount: u64,
-    gas: u64,
-    fee: u64,
-    from: Cow<'static, str>,
-    to: Cow<'static, str>,
+    pub r#type: u8,
+    pub status: u8,
+    pub create_tick: i64,
+    pub update_tick: i64,
+    pub amount: u64,
+    pub gas: u64,
+    pub fee: u64,
+    pub from: Cow<'static, str>,
+    pub to: Cow<'static, str>,
 }
 
 impl Trade {
@@ -98,6 +98,7 @@ impl TradeManager {
     pub fn insert(&self, trade_id: Cow<'static, str>, trade: Trade)-> Result<()> {
         if !self.tree.contains_key(trade_id.as_bytes())? {
             self.tree.insert(trade_id.as_bytes(), rmp_serde::to_vec(&trade).unwrap())?;
+            log::info!("insert {}-{:?}", trade_id, trade);
         }
         let _ = self.trades.insert(trade_id, trade);
         Ok(())
@@ -106,19 +107,28 @@ impl TradeManager {
         if let Ok(Some(old)) = self.tree.update_and_fetch(trade_id.as_bytes(), |old| {
             old.and_then(|old| {
                 let trade = rmp_serde::from_slice::<Trade>(old).unwrap();
-                f(trade).and_then(|trade| rmp_serde::to_vec(&trade).ok() )
+                f(trade).and_then(|trade| {
+                    let buf = rmp_serde::to_vec(&trade).ok();
+                    self.trades.update(&trade_id, |_, v| {
+                        log::info!("update {}-{:?}", trade_id, trade);
+                        *v = trade;
+                    });
+                    buf
+                })
             })
         }) {
             rmp_serde::from_slice::<Trade>(&old).ok()  
         } else { None }
     }
 
-    pub fn load(&self)-> Result<()> {
+    pub fn load<F: Fn(&Trade)-> bool>(&self, f: F)-> Result<()> {
         let mut iter = self.tree.iter();
         while let Some(Ok(kv)) = iter.next() {
             let key = String::from_utf8(kv.0.to_vec())?;
             let trade: Trade = rmp_serde::from_slice(&kv.1.to_vec())?;
-            add_trade(Cow::from(key), trade);
+            if f(&trade) {
+                add_trade(Cow::from(key), trade);
+            }
         }
         Ok(())
     }
@@ -141,7 +151,7 @@ use once_cell::sync::Lazy;
 use std::sync::Arc;
 static ACCOUNTS: Lazy<Arc<HashMap<Cow<'static, str>, Account>>> = Lazy::new(|| Arc::new(HashMap::default()) );
 
-pub fn add_with_create(account: Cow<'static, str>, trade_id: Cow<'static, str>, amount: u64) {
+fn add_with_create(account: Cow<'static, str>, trade_id: Cow<'static, str>, amount: u64) {
     ACCOUNTS.entry(account).and_modify(|account| {
         account.trades.push(trade_id.clone());
         account.amount += amount;
@@ -159,6 +169,10 @@ pub fn get_trades(account: Cow<'static, str>)-> Vec<Trade>{
         TRADES.trade(&id).map(|t| trades.push(t) );
     }
     trades
+}
+
+pub fn get_trade(trade_id: Cow<'static, str>)-> Option<Trade> {
+    TRADES.trade(&trade_id)
 }
 
 pub fn add_charge(trade_id: Cow<'static, str>, from: Cow<'static, str>, to: Cow<'static, str>, amount: u64, gas: u64, fee: u64)-> Result<()> {
@@ -245,28 +259,25 @@ pub fn complete_withdraw(trade_id: Cow<'static, str>, success: bool)-> bool {
     }
 }
 
-pub fn add_trade(trade_id: Cow<'static, str>, trade: Trade) {           //加载初始化的数据, 仅处理所有成功的交易，保证账户余额正确性, 其他交易可以重新发起
-    if trade.status != Status::Success as u8 {
-    } else {
-        match trade.r#type {
-            TRADE_CHARGE=> {
-                add_with_create(trade.to.clone(), trade_id.clone(), trade.amount);
-            }
-            TRADE_TRANSFER=> {
-                ACCOUNTS.update(&trade.from, |_, account| {
-                    account.trades.push(trade_id.clone());
-                    account.amount -= trade.amount;
-                });
-                add_with_create(trade.to.clone(), trade_id.clone(), trade.amount);
-            }
-            TRADE_WITHDRAW=> {
-                ACCOUNTS.update(&trade.from, |_, account| {
-                    account.trades.push(trade_id.clone());
-                    account.amount -= trade.amount;
-                });
-            }
-            _=> {}
+pub fn add_trade(trade_id: Cow<'static, str>, trade: Trade) {           //加载初始化的数据, 
+    match trade.r#type {
+        TRADE_CHARGE=> {
+            add_with_create(trade.to.clone(), trade_id.clone(), trade.amount);
         }
-        let _ = TRADES.insert(trade_id, trade);
+        TRADE_TRANSFER=> {
+            ACCOUNTS.update(&trade.from, |_, account| {
+                account.trades.push(trade_id.clone());
+                account.amount -= trade.amount;
+            });
+            add_with_create(trade.to.clone(), trade_id.clone(), trade.amount);
+        }
+        TRADE_WITHDRAW=> {
+            ACCOUNTS.update(&trade.from, |_, account| {
+                account.trades.push(trade_id.clone());
+                account.amount -= trade.amount;
+            });
+        }
+        _=> {}
     }
+    let _ = TRADES.insert(trade_id, trade);
 }

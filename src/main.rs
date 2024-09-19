@@ -1,4 +1,4 @@
-use std::{borrow::{Borrow, Cow}, default, io::Read, ptr::addr_eq};
+use std::{borrow::Cow, io::Read};
 mod trade;
 use once_cell::sync::Lazy;
 
@@ -10,7 +10,7 @@ static ADDRS: Lazy<Vec<Cow<'static, str>>> = Lazy::new(|| {
     lines.split('\n').map(|s| Cow::from(s.trim().trim_start_matches("\"").trim_end_matches("\"").to_string()) ).collect()
 });
 
-use trade::{TRADES, get_trades, get_amount};
+use trade::{get_amount, get_trades, Status, TRADES};
 use anyhow::Result;
 
 fn main()-> Result<()> {
@@ -26,7 +26,13 @@ fn main()-> Result<()> {
             ))
         }).level(log::LevelFilter::Info).chain(fern::log_file("account.log")?).apply()?;
     
-    TRADES.load().unwrap();         //重启的时候加载所有的交易记录，注意 我们不处理没有终态的记录，这样可以保证数据的一致性，
+    TRADES.load(|trade| {
+        if trade.status != Status::Fail as u8 {      //重启的时候加载所有的交易记录，注意 失败的不需要加载, 没有终态的 最好单独处理
+            true
+        } else {
+            false
+        }
+    }).unwrap();         
 
     /*      从老的数据库迁移，只需要 读取所有已经完成的交易(成功的) 然后使用 add_trade 写入数据库就可以
             for trade in [all success trade] {
@@ -45,7 +51,7 @@ fn main()-> Result<()> {
 
     std::thread::spawn(|| {
         let mut charge = 0;
-        for id in 0..100 {
+        for id in 0..300 {
             let mut tids = Vec::new();
             for i in 0..200 {
                 let tid = Cow::from(snowflaker::next_id_string().unwrap());
@@ -64,14 +70,13 @@ fn main()-> Result<()> {
                 }
                 std::thread::sleep(std::time::Duration::from_millis(1));
             }
-            //println!("charge count {}", id);
         }
         println!("charge {}", charge);
     });
 
     std::thread::spawn(|| {
         let mut trans = 0;
-        for id in 0..100 {
+        for id in 0..300 {
             let mut tids = Vec::new();
             for i in 0..200 {
                 let tid = Cow::from(snowflaker::next_id_string().unwrap());
@@ -94,14 +99,13 @@ fn main()-> Result<()> {
                 }
                 else { trade::complete_transfer(tid.clone(), false); }
             }
-            //println!("transfer count {}", id);
         }
         println!("transfer {}", trans);
     });
     
     std::thread::spawn(|| {
         let mut withdraw = 0;
-        for id in 0..100 {
+        for id in 0..300 {
             let mut tids = Vec::new();
             for i in 0..200 {
                 let tid = Cow::from(snowflaker::next_id_string().unwrap());
@@ -112,16 +116,15 @@ fn main()-> Result<()> {
             }
             for tid in &tids {
                 if id % 2 == 0 { if trade::complete_withdraw(tid.clone(), true) {
-                    withdraw += 1000;
+                    withdraw += 100;
                 } } else { trade::complete_withdraw(tid.clone(), false); }
                 std::thread::sleep(std::time::Duration::from_millis(1));
             }
-            //println!("withdraw count {}", id);
         }
         println!("withdraw {}", withdraw);
     });
 
-    for _ in 0..10 {
+    for _ in 0..20 {
         let mut total = (0, 0);
         for i in 0..ADDRS.len() {
             get_trades(ADDRS[i].clone());
