@@ -74,7 +74,7 @@ fn main()-> Result<()> {
         println!("charge {}", charge);
     });
 
-    std::thread::spawn(|| {
+    std::thread::spawn(move || {
         let mut trans = 0;
         for id in 0..300 {
             let mut tids = Vec::new();
@@ -82,7 +82,7 @@ fn main()-> Result<()> {
                 let tid = Cow::from(snowflaker::next_id_string().unwrap());
                 let from = Cow::from(ADDRS[i].clone());
                 let to = Cow::from(ADDRS[200 + i].clone());
-                trade::add_transfer(tid.clone(), from, to, 100, 10, 10).unwrap();
+                let _ = trade::add_transfer(tid.clone(), from, to, 100, 10, 10).map_err(|e| log::error!("{:?}", e));
                 std::thread::sleep(std::time::Duration::from_millis(1));
                 tids.push(tid);
             }
@@ -101,6 +101,8 @@ fn main()-> Result<()> {
             }
         }
         println!("transfer {}", trans);
+        let elaspe = std::time::Instant::now().duration_since(now);
+        println!("{:?}", elaspe);
     });
     
     std::thread::spawn(|| {

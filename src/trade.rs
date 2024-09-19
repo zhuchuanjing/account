@@ -30,47 +30,41 @@ pub struct Trade {
 }
 
 impl Trade {
+    fn modify(&mut self, r#type: u8, prev: Status, next: Status)-> bool {
+        if self.r#type == r#type && self.status == prev as u8 { 
+            self.status = next as u8;
+            self.update_tick = chrono::Utc::now().timestamp();
+            true
+        } else { false }
+    }
+}
+
+impl Trade {
     pub fn charge(from: Cow<'static, str>, to: Cow<'static, str>, amount: u64, gas: u64, fee: u64)-> Self {
         Self{r#type: TRADE_CHARGE, status: Status::Processing as u8, create_tick: chrono::Utc::now().timestamp(), update_tick: 0, amount, gas, fee, from, to}
     }
     pub fn complete_charge(&mut self, success: bool)-> bool {
-        if self.r#type == TRADE_CHARGE && self.status == Status::Processing as u8 { 
-            if success { self.status = Status::Success as u8; }
-            else { self.status = Status::Fail as u8; }
-            self.update_tick = chrono::Utc::now().timestamp();
-            true
-        } else { false }
+        if success { self.modify(TRADE_CHARGE, Status::Processing, Status::Success) }
+        else { self.modify(TRADE_CHARGE, Status::Processing, Status::Fail) }
     }
 
     pub fn transfer(from: Cow<'static, str>, to: Cow<'static, str>, amount: u64, gas: u64, fee: u64)-> Self {
         Self{r#type: TRADE_TRANSFER, status: Status::Idle as u8, create_tick: chrono::Utc::now().timestamp(), update_tick: 0, amount, gas, fee, from, to}
     }
     pub fn start_transfer(&mut self)-> bool {
-        if self.r#type == TRADE_TRANSFER && self.status == Status::Idle as u8 { 
-            self.status = Status::Processing as u8;
-            self.update_tick = chrono::Utc::now().timestamp();
-            true
-        } else { false }
+        self.modify(TRADE_TRANSFER, Status::Idle, Status::Processing)
     }
     pub fn complete_transfer(&mut self, success: bool)-> bool {
-        if self.r#type == TRADE_TRANSFER && self.status == Status::Processing as u8 { 
-            if success { self.status = Status::Success as u8; }
-            else { self.status = Status::Fail as u8; }
-            self.update_tick = chrono::Utc::now().timestamp();
-            true
-        } else { false }
+        if success { self.modify(TRADE_TRANSFER, Status::Processing, Status::Success) }
+        else { self.modify(TRADE_TRANSFER, Status::Processing, Status::Fail) }
     }
 
     pub fn with_draw(from: Cow<'static, str>, to: Cow<'static, str>, amount: u64, gas: u64, fee: u64)-> Self {
         Self{r#type: TRADE_WITHDRAW, status: Status::Processing as u8, create_tick: chrono::Utc::now().timestamp(), update_tick: 0, amount, gas, fee, from, to}
     }
     pub fn complete_withdraw(&mut self, success: bool)-> bool {
-        if self.r#type == TRADE_WITHDRAW && self.status == Status::Processing as u8 { 
-            if success { self.status = Status::Success as u8; }
-            else { self.status = Status::Fail as u8; }
-            self.update_tick = chrono::Utc::now().timestamp();
-            true
-        } else { false }
+        if success { self.modify(TRADE_WITHDRAW, Status::Processing, Status::Success) }
+        else { self.modify(TRADE_WITHDRAW, Status::Processing, Status::Fail) }
     }
 }
 
@@ -84,8 +78,7 @@ pub struct TradeManager {
 
 impl TradeManager {
     pub fn new(path: &str)-> Self {
-        let db = sled::open(path).unwrap();
-        let tree = db.open_tree("TRADES").unwrap();
+        let tree = sled::open(path).unwrap().open_tree("TRADES").unwrap();
         Self{trades: HashMap::default(), tree}
     }
     pub fn trade(&self, id: &Cow<'static, str>)-> Option<Trade> {
