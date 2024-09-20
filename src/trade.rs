@@ -24,9 +24,12 @@ pub struct Trade {
     pub update_tick: i64,
     pub amount: u64,
     pub gas: u64,
-    pub fee: u64,
     pub from: Cow<'static, str>,
     pub to: Cow<'static, str>,
+    pub from_node: Option<Cow<'static, str>>,
+    pub to_node: Option<Cow<'static, str>>,
+    pub channel: Option<Cow<'static, str>>,
+    pub hash: Cow<'static, str>,
 }
 
 impl Trade {
@@ -46,16 +49,19 @@ impl Trade {
 }
 
 impl Trade {
-    pub fn charge(from: Cow<'static, str>, to: Cow<'static, str>, amount: u64, gas: u64, fee: u64)-> Self {
-        Self{r#type: TRADE_CHARGE, status: Status::Start as u8, create_tick: chrono::Utc::now().timestamp(), update_tick: 0, amount, gas, fee, from, to}
+    pub fn charge(from: Cow<'static, str>, to: Cow<'static, str>, amount: u64, gas: u64, hash: Cow<'static, str>)-> Self {
+        Self{r#type: TRADE_CHARGE, status: Status::Start as u8, create_tick: chrono::Utc::now().timestamp(), update_tick: 0,
+            amount, gas, from, to, hash, from_node: None, to_node: None, channel: None}
     }
 
-    pub fn transfer(from: Cow<'static, str>, to: Cow<'static, str>, amount: u64, gas: u64, fee: u64)-> Self {
-        Self{r#type: TRADE_TRANSFER, status: Status::Start as u8, create_tick: chrono::Utc::now().timestamp(), update_tick: 0, amount, gas, fee, from, to}
+    pub fn transfer(from: Cow<'static, str>, to: Cow<'static, str>, amount: u64, gas: u64, hash: Cow<'static, str>)-> Self {
+        Self{r#type: TRADE_TRANSFER, status: Status::Start as u8, create_tick: chrono::Utc::now().timestamp(), update_tick: 0,
+            amount, gas, from, to, hash, from_node: None, to_node: None, channel: None}
     }
 
-    pub fn with_draw(from: Cow<'static, str>, to: Cow<'static, str>, amount: u64, gas: u64, fee: u64)-> Self {
-        Self{r#type: TRADE_WITHDRAW, status: Status::Start as u8, create_tick: chrono::Utc::now().timestamp(), update_tick: 0, amount, gas, fee, from, to}
+    pub fn with_draw(from: Cow<'static, str>, to: Cow<'static, str>, amount: u64, gas: u64, fee: u64, hash: Cow<'static, str>)-> Self {
+        Self{r#type: TRADE_WITHDRAW, status: Status::Start as u8, create_tick: chrono::Utc::now().timestamp(), update_tick: 0,
+            amount, gas, from, to, hash, from_node: None, to_node: None, channel: None}
     }
 }
 
@@ -69,7 +75,7 @@ pub static TRADES: Lazy<Vec<Arc<TradeManager>>> = Lazy::new(|| {
 });
 
 pub trait TradeStore<T: Serialize + DeserializeOwned + Clone + std::fmt::Debug> {
-    fn contains(&self, trade_id: &Cow<'static, str>)-> bool;
+    fn contains(&self, id: &Cow<'static, str>)-> bool;
     fn insert(&self, id: &Cow<'static, str>, t: &T)-> bool;                          //增加一条交易,如果已经存在则返回 false
     fn update<F: Fn(T)-> Option<T>>(&self, id: &Cow<'static, str>, f: F)-> Option<T>;
     fn get(&self, id: &Cow<'static, str>)-> Option<T>;
