@@ -57,7 +57,7 @@ fn main()-> Result<()> {
             }
         }        
     }*/
-    for i in 0..10 {
+    /*for i in 0..10 {
         let trades = get_trades(&ADDRS[i]);
         for trade in trades {
             if trade.2.status == Status::Start as u8 {
@@ -72,7 +72,7 @@ fn main()-> Result<()> {
     }
     display();
 
-    return Ok(());
+    return Ok(());*/
     /*      从老的数据库迁移，只需要 读取所有已经完成的交易(成功的) 然后使用 add_trade 写入数据库就可以
             for trade in [all success trade] {
                 add_trade(trade_id, trade_info);

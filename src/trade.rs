@@ -59,7 +59,6 @@ impl Trade {
     }
 }
 
-
 pub static TRADES: Lazy<Vec<Arc<TradeManager>>> = Lazy::new(|| {
     let db = sled::open("sled").unwrap();
     let mut trades = Vec::new();
@@ -251,7 +250,6 @@ pub fn add_transfer(asset: u32, trade_id: Cow<'static, str>, from: Cow<'static, 
         Ok(())
     } else { Err(anyhow!("{} have no enough amount", from)) }
 }
-
 
 pub fn complete_transfer(asset: u32, trade_id: Cow<'static, str>, success: bool)-> bool {
     if let Some(old) = TRADES[asset as usize].update(trade_id, |mut trade| if trade.modify(success) { Some(trade) } else { None } ) {
