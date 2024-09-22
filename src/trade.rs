@@ -96,11 +96,17 @@ impl Trade {
     }
 }
 
+static REDIS_URL: &'static str = "redis://127.0.0.1";
+
 pub static TRADES: Lazy<Vec<Arc<TradeManager>>> = Lazy::new(|| {
-    let db = sled::open("sled").unwrap();
+    let pool = Arc::new(LinearObjectPool::<Connection>::new(move || {
+        let client = redis::Client::open(REDIS_URL).map_err(|e| log::error!("{:?}", e) ).unwrap();
+        client.get_connection().map_err(|e| log::error!("{:?}", e) ).unwrap()
+    }, move |con| {}));
+
     let mut trades = Vec::new();
     for name in ASSET_NAMES {
-        trades.push(Arc::new(TradeManager::new(&db, Cow::from(name))) );
+        trades.push(Arc::new(TradeManager::new(pool.clone(), Cow::from(name))) );
     }
     trades
 });
@@ -108,14 +114,71 @@ pub static TRADES: Lazy<Vec<Arc<TradeManager>>> = Lazy::new(|| {
 pub trait TradeStore<T: Serialize + DeserializeOwned + Clone + std::fmt::Debug> {
     fn contains(&self, id: &StaticStr)-> bool;
     fn insert(&self, id: &StaticStr, t: &T)-> bool;                                     //增加一条交易,如果已经存在则返回 false
-    fn update<F: FnMut(T)-> Option<T>>(&self, id: &StaticStr, f: F)-> Option<T>;        //基于事务更新指定交易 保证多线程访问的 原子性 成功返回新的值
+    fn update(&self, id: &StaticStr, value: &T)-> bool;
     fn get(&self, id: &StaticStr)-> Option<T>;
     fn load_all<F: Fn(StaticStr, T)>(&self, f: F)-> Result<()>;
 }
 
-pub struct SledStore {
-    name: StaticStr,
-    tree: sled::Tree,
+use lockfree_object_pool::LinearObjectPool;
+use redis::{Connection, Commands};
+
+pub struct RedisStore {
+    list_key: StaticStr,
+    trades_key: StaticStr,
+    pool: Arc<LinearObjectPool::<Connection>>,
+}
+
+impl RedisStore {
+    pub fn new(name: StaticStr, pool: Arc<LinearObjectPool::<Connection>>)-> Self {
+        let list_key = Cow::from(format!("@list::{}", name));
+        let trades_key = Cow::from(format!("@trades::{}", name));
+        Self{list_key, trades_key, pool}
+    }
+}
+
+impl<T: Serialize + DeserializeOwned + Clone + std::fmt::Debug> TradeStore<T> for RedisStore {
+    fn contains(&self, id: &StaticStr)-> bool {
+        let mut c = self.pool.pull();
+        c.hexists(self.trades_key.as_ref(), id).unwrap_or(false)
+    }
+
+    fn insert(&self, id: &StaticStr, t: &T)-> bool {
+        let mut c = self.pool.pull();
+        if c.hexists(self.trades_key.as_ref(), id).unwrap_or(false) {
+            return false;
+        }
+        if c.hset(self.trades_key.as_ref(), id, rmp_serde::to_vec(&t).unwrap()).unwrap_or(false) {
+            c.rpush(self.list_key.as_ref(), id).unwrap_or(false)
+        } else {
+            false
+        }
+    }
+
+    fn update(&self, id: &StaticStr, value: &T)-> bool {       //内存保证多个线程不会同时更新
+        let mut c = self.pool.pull();
+        c.hset(self.trades_key.as_ref(), id, rmp_serde::to_vec(&value).unwrap()).unwrap_or(false)
+    }
+
+    fn get(&self, id: &StaticStr)-> Option<T> {
+        let mut c = self.pool.pull();
+        c.hget::<&str, &str, Vec<u8>>(self.trades_key.as_ref(), id).ok().and_then(|buf| rmp_serde::from_slice::<T>(&buf).ok() )
+    }
+
+    fn load_all<F: FnMut(StaticStr, T)>(&self, mut f: F)-> Result<()> {
+        let mut c = self.pool.pull();
+        let keys: Vec<String> = c.lrange(self.list_key.as_ref(), 0, -1)?;
+        for key in keys {
+            if let Some(trade) = c.hget::<&str, &str, Vec<u8>>(self.trades_key.as_ref(), &key).ok().and_then(|buf| rmp_serde::from_slice::<T>(&buf).ok() ) {
+                f(Cow::from(key), trade);    
+            }
+        }
+        Ok(())
+    }
+}
+
+/*pub struct SledStore {
+    pub name: StaticStr,
+    pub tree: sled::Tree,
 }
 
 impl SledStore {
@@ -131,8 +194,14 @@ impl<T: Serialize + DeserializeOwned + Clone + std::fmt::Debug> TradeStore<T> fo
     }
     fn insert(&self, id: &StaticStr, t: &T)-> bool {
         if !self.tree.contains_key(id.as_bytes()).unwrap_or(false) {
-            log::info!("insert {} {} {:?}", self.name, id, t);
-            self.tree.insert(id.as_bytes(), rmp_serde::to_vec(&t).unwrap()).is_ok()
+            match self.tree.insert(id.as_bytes(), rmp_serde::to_vec(&t).unwrap()) {
+                Err(e)=> { log::error!("{:?}", e); false }
+                Ok(_)=> { 
+                    log::info!("insert {} {} {:?}", self.name, id, t);
+                    let _ = self.tree.flush();
+                    true 
+                }
+            }
         } else { false }
     }
     fn update<F: FnMut(T)-> Option<T>>(&self, id: &StaticStr, mut f: F)-> Option<T> {
@@ -148,6 +217,7 @@ impl<T: Serialize + DeserializeOwned + Clone + std::fmt::Debug> TradeStore<T> fo
                 } else { Some(old.to_vec()) }
             })
         );
+        let _ = self.tree.flush();
         v
     }
     fn get(&self, id: &StaticStr)-> Option<T> {
@@ -163,16 +233,16 @@ impl<T: Serialize + DeserializeOwned + Clone + std::fmt::Debug> TradeStore<T> fo
         Ok(())
     }
 }
-
+*/
 pub struct TradeManager {
     pub trades: HashMap<StaticStr, Trade>,                      //内存中保存的所有交易的列表
     pub approving: HashSet<StaticStr>,
-    pub store: SledStore,
+    pub store: RedisStore,
 }
 
 impl TradeManager {
-    pub fn new(db: &sled::Db, name: StaticStr)-> Self {
-        Self{trades: HashMap::default(), approving: HashSet::default(), store: SledStore::new(&db, name)}
+    pub fn new(pool: Arc<LinearObjectPool::<Connection>>, name: StaticStr)-> Self {
+        Self{trades: HashMap::default(), approving: HashSet::default(), store: RedisStore::new( name, pool)}
     }
     pub fn trade(&self, id: &StaticStr)-> Option<Trade> {
         self.trades.get(id).map(|t| t.clone() )
@@ -194,19 +264,29 @@ impl TradeManager {
         Ok(())
     }
     pub fn update<F: Fn(Trade)-> Option<Trade>>(&self, trade_id: StaticStr, f: F)-> Option<Trade> {
-        self.store.update(&trade_id, f).and_then(|update| {
-            self.trades.update(&trade_id, |k, v| {
-                if v.status == TransferStatus::Approving && update.status != TransferStatus::Approving {
-                    let _ = self.approving.insert(k.clone());
+        self.trades.update(&trade_id, |k, v| {
+            if let Some(updated) = f(v.clone()) {
+                if self.store.update(&trade_id, &updated) {
+                    if v.status == TransferStatus::Approving && updated.status != TransferStatus::Approving {
+                        let _ = self.approving.insert(k.clone());
+                        return std::mem::replace(v, updated);
+                    }
                 }
-                std::mem::replace(v, update)
-            })
+            }
+            v.clone()
         })
     }
 }
 
 pub const ASSET_NUM: usize = 8;             //暂时支持最多8个资产
-pub const ASSET_NAMES: [&'static str; ASSET_NUM] = ["btc", "rna", "jerry", "tom", "zhu", "pig", "godess", "none"];
+pub const ASSET_NAMES: [&'static str; ASSET_NUM] = ["BTC_ASSET_ID", "rgb:7Yjbbk!p-Dl4GOJG-Z2ct!BU-yJ2Ji8I-z13MdSL-QAklonM",
+    "rgb:o2PKHzYo-YVviDw7-LKUJAPH-ARrmVW0-aQndBsH-WJJ2540", "rgb:P1Jy$7jt-5ezm74W-SSlIuCW-axO9dfV-$9TPimE-gex6l$8",
+    "rgb:!BmcPbfz-BpQWa0Q-qsmVlp0-VV12tvx-I2WkNz3-D!dGFmw", "rgb:RspPWEW9-mzuSNHQ-dGCb054-bLjHPYi-$I9$Ih2-Fy9vxFU",
+    "rgb:VNyUso5w-6rx1FoB-kODxlFs-$Ej0BJP-aIsyDMs-acdufQs", "_reserved_2"];
+
+pub fn get_asset_id(asset_name: &str)-> Result<usize> {
+    ASSET_NAMES.iter().position(|a| *a == asset_name ).ok_or(anyhow!("unknow asset {}", asset_name) )
+}
 
 #[derive(Clone, Debug)]
 pub struct Account {
@@ -259,6 +339,9 @@ impl Account {
         true
     }
     pub fn decrease(&mut self, asset: usize, trade: &Trade)-> bool {      //减少 asset 仅用于重新加载的时候 没有锁定直接减少
+        if self.amounts[asset].0 < trade.amount {
+            return false;
+        }
         self.amounts[asset].0 -= trade.amount;
         for g in &trade.gas {
             self.amounts[g.asset as usize].0 -= g.amount;
@@ -270,6 +353,7 @@ impl Account {
 use once_cell::sync::Lazy;
 use std::sync::Arc;
 static ACCOUNTS: Lazy<Arc<HashMap<StaticStr, Account>>> = Lazy::new(|| Arc::new(HashMap::default()) );
+pub static WARNINGS: Lazy<Arc<HashSet<(u32, StaticStr)>>> = Lazy::new(|| Arc::new(HashSet::default()) );
 
 fn account_modify<F: FnOnce(&mut Account)-> bool>(account: &StaticStr, f: F)-> bool {                                           //充值或者转账到账
     ACCOUNTS.update(account, |_, account| f(account) ).unwrap_or(false)
@@ -291,28 +375,35 @@ fn account_start(asset: u32, trade_id: StaticStr, trade: &Trade)-> bool {       
 }
 
 fn account_success(asset: u32, trade: &Trade, with_lock: bool)-> bool {            //成功完成一笔交易
-    account_modify(&trade.from, |account| {
+    if account_modify(&trade.from, |account| {
         if with_lock {
             account.confirm(asset as usize, &trade)
         } else {
-            account.decrease(asset as usize, &trade)
+            if !account.decrease(asset as usize, &trade) {
+                log::error!("debit {} {} {}", ASSET_NAMES[asset as usize], trade.from, trade.amount);
+                let _ = WARNINGS.insert((asset, trade.from.clone()));
+            }
+            true
         }
-    });            
-    for g in &trade.gas {
-        account_modify(&g.to, |account| account.income(g.asset as usize, g.amount) );
-    }    
-    account_modify(&trade.to, |account| account.income(asset as usize, trade.amount) )
+    }) {
+        for g in &trade.gas {
+            account_modify(&g.to, |account| account.income(g.asset as usize, g.amount) );
+        }    
+        account_modify(&trade.to, |account| account.income(asset as usize, trade.amount) )
+    } else { false }           
 }
 
 pub fn get_amount(account: &StaticStr)-> Option<[(u64, u64); ASSET_NUM]>{
     ACCOUNTS.get(account).map(|account| account.amounts )
 }
 
-pub fn get_trades(account: &StaticStr)-> Vec<(u32, StaticStr, Trade)>{
-    let ids = ACCOUNTS.get(account).map(|account| account.trades.clone() ).unwrap_or(Vec::new());
+pub fn get_trades(asset: u32, account: &StaticStr)-> Vec<(StaticStr, Trade)>{
+    let ids = ACCOUNTS.get(account).map(|account| {
+        account.trades.iter().filter_map(|t| if t.0 == asset { Some(t.1.clone()) } else { None }).collect()
+    }).unwrap_or(Vec::new());
     let mut trades = Vec::new();
-    for (asset, id) in ids {
-        TRADES[asset as usize].trade(&id).map(|t| trades.push((asset, id, t)) );
+    for id in ids {
+        TRADES[asset as usize].trade(&id).map(|t| trades.push((id.clone(), t)) );
     }
     trades
 }
@@ -397,6 +488,7 @@ pub fn add_trade(asset: u32, trade_id: StaticStr, trade: Trade) {           //�
         }
         TransferType::Withdraw=> {
             account_add(trade.from.clone(), asset, trade_id.clone());
+            account_add(trade.to.clone(), asset, trade_id.clone());
             if trade.status == TransferStatus::Succeeded {
                 account_success(asset, &trade, false);
             } else if trade.status != TransferStatus::Failed {
@@ -405,4 +497,13 @@ pub fn add_trade(asset: u32, trade_id: StaticStr, trade: Trade) {           //�
         }
         _=> {}
     }
+}
+
+pub fn import_trade(asset: u32, trade_id: StaticStr, trade: Trade)-> bool {
+    if !TRADES[asset as usize].contains(&trade_id) {
+        TRADES[asset as usize].store.insert(&trade_id, &trade);
+        add_trade(asset as u32, trade_id.clone(), trade.clone());
+        TRADES[asset as usize].add_trade(trade_id, trade);
+        true
+    } else { false }
 }
