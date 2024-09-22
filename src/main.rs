@@ -7,6 +7,11 @@ use mysql::prelude::*;
 use serde::{Deserialize, Serialize};
 use trade::{TransferStatus, TransferType};
 use chrono::NaiveDateTime;
+use chrono::{DateTime, Utc, TimeZone};
+pub fn mysql_to_Utc(dt: &str)-> Option<DateTime<Utc>> {
+    DateTime::parse_from_str(dt, "%Y-%m-%d %H:%M:%S").ok().map(|dt| dt.to_utc() )
+}
+
 static ADDRS: Lazy<Vec<Cow<'static, str>>> = Lazy::new(|| {
     let mut fs = std::fs::File::open("addr.txt").unwrap();
     let mut lines = String::new();
@@ -60,8 +65,8 @@ pub struct TransferLN {
     pub transfer_type: Option<TransferType>,
     pub check_withdraw: Option<u8>,
     pub withdraw_txid: Option<String>,
-    pub created_at: Option<NaiveDateTime>,
-    pub updated_at: Option<NaiveDateTime>,
+    pub created_at: Option<String>,
+    pub updated_at: Option<String>,
 }
 
 impl Default for TransferLN {
@@ -88,11 +93,14 @@ fn main()-> Result<()> {
     let pool = Pool::new(url)?;
     let mut conn = pool.get_conn()?;
             // Let's create a table for payments.
-    let trades = conn.query_map("SELECT transfer_id, transfer_type, transfer_status from t_ln_transfer limit 100", |(transfer_id, transfer_type, transfer_status)| {
+    let trades = conn.query_map("SELECT transfer_id, transfer_type, transfer_status, created_at, updated_at from t_ln_transfer limit 10",
+    |(transfer_id, transfer_type, transfer_status, created_at, updated_at)| {
             let mut tx = TransferLN::default();
             tx.transfer_id = transfer_id;
             tx.transfer_type = get_type(transfer_type);
             tx.transfer_status = get_status(transfer_status);
+            tx.created_at = created_at;
+            tx.updated_at = updated_at;
             tx
         }
 /*             |(id, transfer_id, from_address, withdraw_address, to_address, from_node_id, to_node_id, channel_id, transfer_asset_id, transfer_amount,
