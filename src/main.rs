@@ -24,34 +24,6 @@ pub fn get_type(key: &str)-> Option<TransferType> {
     TYPES.iter().find(|s| s.0 == key ).map(|s| s.1.clone() )
 }
 
-/*#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct TransferLN {
-    pub id: Option<u64>,
-    pub transfer_id: Option<String>,
-    pub from_address: Option<String>,
-    pub withdraw_address: Option<String>,
-    pub to_address: Option<String>,
-    pub from_node_id: Option<String>,
-    pub to_node_id: Option<String>,
-    pub channel_id: Option<String>,
-    pub transfer_asset_id: Option<String>,
-    pub transfer_amount: Option<u64>,
-    pub transfer_hash: Option<String>,
-    pub gas_amount: Option<u64>,
-    pub transfer_status: Option<TransferStatus>,
-    pub transfer_type: Option<TransferType>,
-    pub check_withdraw: Option<u8>,
-    pub withdraw_txid: Option<String>,
-    pub created_at: Option<String>,
-    pub updated_at: Option<String>,
-}
-impl Default for TransferLN {
-    fn default() -> Self {
-        Self{id: None, transfer_id: None, from_address: None, withdraw_address: None, to_address: None, from_node_id: None, to_node_id: None, channel_id: None, transfer_asset_id: None,
-            transfer_amount: None, transfer_hash: None, gas_amount: None, transfer_status: None, transfer_type: None, check_withdraw: None, withdraw_txid: None, created_at: None, updated_at: None}
-    }
-}*/
-
 fn main()-> Result<()> {
     fern::Dispatch::new().format(|out, message, record| {
         out.finish(format_args!(
@@ -64,6 +36,7 @@ fn main()-> Result<()> {
         ))
     }).level(log::LevelFilter::Info).chain(fern::log_file("account.log")?).apply()?;
 
+    let start = std::time::Instant::now();
     let mut threads = Vec::new();
     for asset in 0..trade::ASSET_NUM {
         threads.push(std::thread::spawn(move || {
@@ -78,18 +51,27 @@ fn main()-> Result<()> {
         println!("{:?}", t.join());
     }
     
+    println!("{:?}", std::time::Instant::now().duration_since(start));
+
+    return Ok(());
     trade::WARNINGS.scan(|k| {
-        println!("Asset - {} Account - {}", k.0, k.1);
-        for trade in trade::get_trades(k.0, &k.1) {
-            println!("{} : {} - {} - {}", trade.0, trade.1.from, trade.1.to, trade.1.amount );
+        if k.0 != 2 {
+            println!("Asset - {} Account - {}", k.0, k.1);
+            for trade in trade::get_trades(k.0, &k.1) {
+                println!("{} : {} - {} - {}", trade.0, trade.1.from, trade.1.to, trade.1.amount );
+            }
         }
     });
-    return Ok(());
 
     let url = "mysql://marketplace-readonly:Ag3e5eyERjOWuEkhjlG1@127.0.0.1:9001/wallet-online-db";
     let pool = Pool::new(url)?;
     let mut conn = pool.get_conn()?;
-    let rows: Vec<Row> = conn.query("SELECT * from t_ln_transfer WHERE created_at >= \"2024-09-15 00:00:00\" and created_at < \"2024-09-23 00:00:00\" ")?;
+    //let rows: Vec<Row> = conn.query("SELECT * from t_ln_transfer WHERE created_at >= \"2024-09-15 00:00:00\" and created_at < \"2024-09-23 00:00:00\" ")?;
+    //let rows: Vec<Row> = conn.query("SELECT * from t_ln_transfer WHERE created_at < \"2024-08-20 00:00:00\" ")?;
+    //let rows: Vec<Row> = conn.query("SELECT * from t_ln_transfer WHERE created_at >= \"2024-08-20 00:00:00\" AND created_at < \"2024-08-25 00:00:00\" ")?;
+    //let rows: Vec<Row> = conn.query("SELECT * from t_ln_transfer WHERE created_at >= \"2024-08-25 00:00:00\" AND created_at < \"2024-08-30 00:00:00\" ")?;
+    //let rows: Vec<Row> = conn.query("SELECT * from t_ln_transfer WHERE created_at >= \"2024-08-30 00:00:00\" AND created_at < \"2024-09-10 00:00:00\" ")?;
+    let rows: Vec<Row> = conn.query("SELECT * from t_ln_transfer WHERE created_at >= \"2024-09-10 00:00:00\" AND created_at < \"2024-09-25 00:00:00\" ")?;
     println!("total {}", rows.len());
     let mut count = 0;
     for row in rows {

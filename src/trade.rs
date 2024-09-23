@@ -71,15 +71,6 @@ impl Trade {
 }
 
 impl Trade {
-    /*pub fn charge(from: StaticStr, to: StaticStr, amount: u64, gas: u64, hash: StaticStr)-> Self {
-        Self{r#type: TRADE_CHARGE, status: Status::Start as u8, create_tick: chrono::Utc::now().timestamp(), update_tick: 0,
-            amount, gas, from, to, hash, from_node: None, to_node: None, channel: None}
-    }
-
-    pub fn transfer(from: StaticStr, to: StaticStr, amount: u64, gas: u64, hash: StaticStr)-> Self {
-        Self{r#type: TRADE_TRANSFER, status: Status::Start as u8, create_tick: chrono::Utc::now().timestamp(), update_tick: 0,
-            amount, gas, from, to, hash, from_node: None, to_node: None, channel: None}
-    }*/
     pub fn pay(from: StaticStr, to: StaticStr, amount: u64, gas: Vec<GasInfo>, hash: StaticStr)-> Self {
         Self{r#type: TransferType::Pay, status: TransferStatus::Pending, create_tick: chrono::Utc::now().timestamp(), update_tick: 0,
             amount, gas, from, to, hash, from_node: None, to_node: None, channel: None}
@@ -176,64 +167,6 @@ impl<T: Serialize + DeserializeOwned + Clone + std::fmt::Debug> TradeStore<T> fo
     }
 }
 
-/*pub struct SledStore {
-    pub name: StaticStr,
-    pub tree: sled::Tree,
-}
-
-impl SledStore {
-    pub fn new(db: &sled::Db, name: StaticStr) -> Self {
-        let tree = db.open_tree(name.as_ref()).unwrap();
-        Self{name: Cow::from(name), tree}
-    }
-}
-
-impl<T: Serialize + DeserializeOwned + Clone + std::fmt::Debug> TradeStore<T> for SledStore {
-    fn contains(&self, id: &StaticStr)-> bool {
-        self.tree.contains_key(id.as_bytes()).unwrap_or(false)
-    }
-    fn insert(&self, id: &StaticStr, t: &T)-> bool {
-        if !self.tree.contains_key(id.as_bytes()).unwrap_or(false) {
-            match self.tree.insert(id.as_bytes(), rmp_serde::to_vec(&t).unwrap()) {
-                Err(e)=> { log::error!("{:?}", e); false }
-                Ok(_)=> { 
-                    log::info!("insert {} {} {:?}", self.name, id, t);
-                    let _ = self.tree.flush();
-                    true 
-                }
-            }
-        } else { false }
-    }
-    fn update<F: FnMut(T)-> Option<T>>(&self, id: &StaticStr, mut f: F)-> Option<T> {
-        let mut v = None;
-        let _ = self.tree.update_and_fetch(id.as_bytes(), |old|
-            old.and_then(|old| {
-                let old_value = rmp_serde::from_slice::<T>(old).unwrap();
-                if let Some(new_value) = f(old_value) {
-                    log::info!("update {} {} {:?}", self.name, id, new_value);
-                    let buf = rmp_serde::to_vec(&new_value).ok();
-                    v = Some(new_value);
-                    buf
-                } else { Some(old.to_vec()) }
-            })
-        );
-        let _ = self.tree.flush();
-        v
-    }
-    fn get(&self, id: &StaticStr)-> Option<T> {
-        self.tree.get(id.as_bytes()).map(|t| t.and_then(|t| rmp_serde::from_slice::<T>(&t).ok() ) ).unwrap_or(None)
-    }
-    fn load_all<F: FnMut(StaticStr, T)>(&self, mut f: F)-> Result<()> {
-        let mut iter = self.tree.iter();
-        while let Some(Ok(kv)) = iter.next() {
-            let id = String::from_utf8(kv.0.to_vec())?;
-            let trade: T = rmp_serde::from_slice(&kv.1.to_vec())?;
-            f(Cow::from(id), trade);
-        }
-        Ok(())
-    }
-}
-*/
 pub struct TradeManager {
     pub trades: HashMap<StaticStr, Trade>,                      //内存中保存的所有交易的列表
     pub approving: HashSet<StaticStr>,
