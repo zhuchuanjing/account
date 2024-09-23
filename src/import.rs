@@ -1,3 +1,5 @@
+use crate::trade;
+
 use super::trade::{TransferType, TransferStatus, Trade, StaticStr, TRADES, TradeStore};
 
 const STATUSS: [(&'static str, TransferStatus); 5] = [("Approving", TransferStatus::Approving), ("WaitBroadcast", TransferStatus::WaitBroadcast), ("Pending", TransferStatus::Pending), ("Succeeded", TransferStatus::Succeeded), ("Failed", TransferStatus::Failed)];
@@ -26,6 +28,18 @@ pub fn import_trade(asset: u32, trade_id: StaticStr, trade: Trade)-> bool {
         TRADES[asset as usize].add_trade(trade_id, trade);
         true
     } else { false }
+}
+
+pub fn load_air_drop(row: mysql::Row)-> Result<()> {
+    let id = row.get::<u64, &str>("id").ok_or(anyhow!("no id"))?;
+    let address = Cow::from(row.get::<String, &str>("address").ok_or(anyhow!("no address"))?);
+    let number = row.get::<u64, &str>("had_drop_number").ok_or(anyhow!("no had_drop_number"))?;
+    let trade = Trade::airdrop(address.clone(), number);
+    let _= import_trade(trade::ASSET_JERRY, Cow::from(format!("air_drop_jerry-{}", id)), trade);
+    let gas = row.get::<u64, &str>("had_drop_gas_number").ok_or(anyhow!("no had_drop_gas_number"))?;
+    let trade = Trade::airdrop(address, gas);
+    let _= import_trade(trade::ASSET_RNA, Cow::from(format!("air_drop_rna-{}", id)), trade);
+    Ok(())
 }
 
 pub fn load_mysql_row(row: mysql::Row)-> Result<()> {

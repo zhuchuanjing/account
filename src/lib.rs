@@ -217,6 +217,9 @@ pub(crate) fn add_trade(asset: u32, trade_id: StaticStr, trade: Trade) {        
                 account_start(asset, trade_id, &trade);
             }
         }
+        TransferType::AirDrop=> {
+            account_modify(&trade.to, |account| account.income(asset as usize, trade.amount) );
+        }
         _=> {}
     }
 }

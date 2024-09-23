@@ -14,6 +14,7 @@ pub enum TransferType {
     NodeWithdraw,
     Pay,
     Gas,
+    AirDrop,                                    //空投类型 仅作为历史需要保留 没有来源的入账 
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -71,6 +72,10 @@ impl Trade {
 }
 
 impl Trade {
+    pub fn airdrop(to: StaticStr, amount: u64)-> Self {
+        Self{r#type: TransferType::AirDrop, status: TransferStatus::Succeeded, create_tick: chrono::Utc::now().timestamp(), update_tick: 0,
+            amount, gas: Vec::new(), from: Cow::from(""), to, hash: Cow::from(""), from_node: None, to_node: None, channel: None}
+    }
     pub fn pay(from: StaticStr, to: StaticStr, amount: u64, gas: Vec<GasInfo>, hash: StaticStr)-> Self {
         Self{r#type: TransferType::Pay, status: TransferStatus::Pending, create_tick: chrono::Utc::now().timestamp(), update_tick: 0,
             amount, gas, from, to, hash, from_node: None, to_node: None, channel: None}
@@ -97,7 +102,10 @@ pub const ASSET_NAMES: [&'static str; ASSET_NUM] = ["BTC_ASSET_ID", "rgb:7Yjbbk!
     "rgb:!BmcPbfz-BpQWa0Q-qsmVlp0-VV12tvx-I2WkNz3-D!dGFmw", "rgb:RspPWEW9-mzuSNHQ-dGCb054-bLjHPYi-$I9$Ih2-Fy9vxFU",
     "rgb:VNyUso5w-6rx1FoB-kODxlFs-$Ej0BJP-aIsyDMs-acdufQs", "_reserved_2"];
 
-    
+pub static ASSET_JERRY: u32 = 5;
+pub static ASSET_RNA: u32 = 2;
+
+
 pub static TRADES: Lazy<Vec<Arc<TradeManager>>> = Lazy::new(|| {
     let pool = Arc::new(LinearObjectPool::<Connection>::new(move || {
         let client = redis::Client::open(REDIS_URL).map_err(|e| log::error!("{:?}", e) ).unwrap();
