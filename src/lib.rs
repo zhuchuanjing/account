@@ -70,12 +70,16 @@ use std::sync::Arc;
 static ACCOUNTS: Lazy<Arc<HashMap<StaticStr, Account>>> = Lazy::new(|| Arc::new(HashMap::default()) );
 pub static WARNINGS: Lazy<Arc<HashSet<(u32, StaticStr)>>> = Lazy::new(|| Arc::new(HashSet::default()) );
 
-fn account_modify<F: FnOnce(&mut Account)-> bool>(account: &StaticStr, f: F)-> bool {                                           //充值或者转账到账
+/*fn account_modify<F: FnOnce(&mut Account)-> bool>(account: &StaticStr, f: F)-> bool {                                           //充值或者转账到账
     ACCOUNTS.update(account, |_, account| f(account) ).unwrap_or(false)
+}*/
+
+async fn account_modify<F: FnOnce(&mut Account)-> bool>(account: &StaticStr, f: F)-> bool {
+    ACCOUNTS.update_async(account, |_, account| f(account) ).await.unwrap_or(false)
 }
 
-fn account_add(account: StaticStr, asset: u32, trade_id: StaticStr, amount: Option<u64>) {       //用于转账接收方或者充值方 如果账号不存在则创建一个
-    ACCOUNTS.entry(account).and_modify(|account| {
+async fn account_add(account: StaticStr, asset: u32, trade_id: StaticStr, amount: Option<u64>) {       //用于转账接收方或者充值方 如果账号不存在则创建一个
+    ACCOUNTS.entry_async(account).await.and_modify(|account| {
         amount.map(|amount| account.amounts[asset as usize].0 += amount );
         account.trades.push((asset, trade_id.clone()));
     }).or_insert({
@@ -85,16 +89,16 @@ fn account_add(account: StaticStr, asset: u32, trade_id: StaticStr, amount: Opti
     });
 }
 
-fn account_start(asset: u32, trade_id: StaticStr, trade: &Trade)-> bool {       //创建一笔转账或者提现交易
+async fn account_start(asset: u32, trade_id: StaticStr, trade: &Trade)-> bool {       //创建一笔转账或者提现交易
     account_modify(&trade.from, |account| 
         if account.lock(asset as usize, &trade) {
             account.trades.push((asset, trade_id));
             true
         } else { false }
-    )
+    ).await
 }
 
-fn account_success(asset: u32, trade: &Trade, with_lock: bool)-> bool {            //成功完成一笔交易
+async fn account_success(asset: u32, trade: &Trade, with_lock: bool)-> bool {            //成功完成一笔交易
     if account_modify(&trade.from, |account| {
         if with_lock {
             account.confirm(asset as usize, &trade)
@@ -105,125 +109,125 @@ fn account_success(asset: u32, trade: &Trade, with_lock: bool)-> bool {         
             }
             true
         }
-    }) {
+    }).await {
         for g in &trade.gas {
-            account_modify(&g.to, |account| account.income(g.asset as usize, g.amount) );
+            account_modify(&g.to, |account| account.income(g.asset as usize, g.amount) ).await;
         }    
-        account_modify(&trade.to, |account| account.income(asset as usize, trade.amount) )
+        account_modify(&trade.to, |account| account.income(asset as usize, trade.amount) ).await
     } else { false }           
 }
 
 use anyhow::{Result, anyhow};
-use trade::{ASSET_NAMES, ASSET_NUM, TRADES, TransferType, TransferStatus, TradeStore};
+use trade::{ASSET_NAMES, ASSET_NUM, TRADES, TransferType, TransferStatus};
 
 pub fn get_asset_id(asset_name: &str)-> Result<usize> {
     ASSET_NAMES.iter().position(|a| *a == asset_name ).ok_or(anyhow!("unknow asset {}", asset_name) )
 }
 
-pub fn get_amount(account: &StaticStr)-> Option<[(u64, u64); ASSET_NUM]>{
-    ACCOUNTS.get(account).map(|account| account.amounts )
+pub async fn get_amount(account: &StaticStr)-> Option<[(u64, u64); ASSET_NUM]>{
+    ACCOUNTS.get_async(account).await.map(|account| account.amounts )
 }
 
-pub fn get_trades(asset: u32, account: &StaticStr)-> Vec<(StaticStr, Trade)>{
+pub async fn get_trades(asset: u32, account: &StaticStr)-> Vec<(StaticStr, Trade)>{
     let ids = ACCOUNTS.get(account).map(|account| {
         account.trades.iter().filter_map(|t| if t.0 == asset { Some(t.1.clone()) } else { None }).collect()
     }).unwrap_or(Vec::new());
     let mut trades = Vec::new();
     for id in ids {
-        TRADES[asset as usize].trade(&id).map(|t| trades.push((id.clone(), t)) );
+        TRADES[asset as usize].trade(&id).await.map(|t| trades.push((id.clone(), t)) );
     }
     trades
 }
 
-pub fn add_fund(asset: u32, trade_id: StaticStr, from: StaticStr, to: StaticStr, amount: u64, hash: StaticStr)-> Result<()> {
-    if TRADES[asset as usize].contains(&trade_id) { return Err(anyhow!("trade {} existed", trade_id )); }
+pub async fn add_fund(asset: u32, trade_id: StaticStr, from: StaticStr, to: StaticStr, amount: u64, hash: StaticStr)-> Result<()> {
+    if TRADES[asset as usize].contains(&trade_id).await { return Err(anyhow!("trade {} existed", trade_id )); }
     let trade = Trade::fund(from, to.clone(), amount, hash);
-    let _ = TRADES[asset as usize].insert(trade_id.clone(), trade.clone());
-    account_add(to, asset, trade_id, None);
+    let _ = TRADES[asset as usize].insert(trade_id.clone(), trade.clone()).await;
+    account_add(to, asset, trade_id, None).await;
     Ok(())
 }
 
-pub fn complete_fund(asset: u32, trade_id: StaticStr, success: bool)-> bool {
-    if let Some(old) = TRADES[asset as usize].update(trade_id, |mut trade| if trade.success() { Some(trade) } else { None } ) {      //update success
-        if success { account_modify(&old.to, |account| account.income(asset as usize, old.amount) ) }
+pub async fn complete_fund(asset: u32, trade_id: StaticStr, success: bool)-> bool {
+    if let Some(old) = TRADES[asset as usize].update(trade_id, |mut trade| if trade.success() { Some(trade) } else { None } ).await {      //update success
+        if success { account_modify(&old.to, |account| account.income(asset as usize, old.amount) ).await }
         else { true }
     } else { false}
 }
 
 
-pub fn add_pay(asset: u32, trade_id: StaticStr, from: StaticStr, to: StaticStr, amount: u64, gas: Vec<GasInfo>, hash: StaticStr)-> Result<()> {
-    if TRADES[asset as usize].contains(&trade_id) { return Err(anyhow!("trade {} existed", trade_id )); }
+pub async fn add_pay(asset: u32, trade_id: StaticStr, from: StaticStr, to: StaticStr, amount: u64, gas: Vec<GasInfo>, hash: StaticStr)-> Result<()> {
+    if TRADES[asset as usize].contains(&trade_id).await { return Err(anyhow!("trade {} existed", trade_id )); }
     let trade = Trade::pay(from, to, amount, gas, hash);
-    if account_start(asset, trade_id.clone(), &trade) {
-        account_add(trade.to.clone(), asset, trade_id.clone(), None);
+    if account_start(asset, trade_id.clone(), &trade).await {
+        account_add(trade.to.clone(), asset, trade_id.clone(), None).await;
         let _ = TRADES[asset as usize].insert(trade_id, trade);
         Ok(())
     } else { Err(anyhow!("{} have no enough amount", trade.from)) }
 }
 
-pub fn complete_pay(asset: u32, trade_id: StaticStr, success: bool)-> bool {
-    if let Some(old) = TRADES[asset as usize].update(trade_id.clone(), |mut trade| if trade.modify(success) { Some(trade) } else { None } ) {
+pub async fn complete_pay(asset: u32, trade_id: StaticStr, success: bool)-> bool {
+    if let Some(old) = TRADES[asset as usize].update(trade_id.clone(), |mut trade| if trade.modify(success) { Some(trade) } else { None } ).await {
         if success {
-            account_success(asset, &old, true)
+            account_success(asset, &old, true).await
         } else {
             account_modify(&old.from, |account| {
-                account.rollback(asset as usize, &old) 
-            })
+                account.rollback(asset as usize, &old)
+            }).await
         }
     } else { false }
 }
 
-pub fn add_withdraw(asset: u32, trade_id: StaticStr, from: StaticStr, to: StaticStr, amount: u64, gas: Vec<GasInfo>, hash: StaticStr)-> Result<()> {
-    if TRADES[asset as usize].contains(&trade_id) { return Err(anyhow!("trade {} existed", trade_id )); }
+pub async fn add_withdraw(asset: u32, trade_id: StaticStr, from: StaticStr, to: StaticStr, amount: u64, gas: Vec<GasInfo>, hash: StaticStr)-> Result<()> {
+    if TRADES[asset as usize].contains(&trade_id).await { return Err(anyhow!("trade {} existed", trade_id )); }
     let trade = Trade::withdraw(from, to, amount, gas, hash);
-    if account_start(asset, trade_id.clone(), &trade) {
-        let _ = TRADES[asset as usize].insert(trade_id, trade);
+    if account_start(asset, trade_id.clone(), &trade).await {
+        let _ = TRADES[asset as usize].insert(trade_id, trade).await;
         Ok(())        
     } else { Err(anyhow!("{} have no enough amount", trade.from)) }
 }
 
-pub fn complete_withdraw(asset: u32, trade_id: StaticStr, success: bool)-> bool {
+pub async fn complete_withdraw(asset: u32, trade_id: StaticStr, success: bool)-> bool {
     if let Some(old) = TRADES[asset as usize].update(trade_id.clone(), |mut trade| {
         if trade.modify(success) { Some(trade) } else { None } 
-    }) {
+    }).await {
         if success {
-            account_success(asset, &old, true)
+            account_success(asset, &old, true).await
         } else {
             account_modify(&old.from, |account| {
                 account.rollback(asset as usize, &old) 
-            })
+            }).await
         }
     } else { false }
 }
 
-pub(crate) fn add_trade(asset: u32, trade_id: StaticStr, trade: Trade) {           //加载初始化的数据, 
+pub(crate) async fn add_trade(asset: u32, trade_id: StaticStr, trade: Trade) {           //加载初始化的数据, 
     match trade.r#type {
         TransferType::Fund=> {
-            account_add(trade.to.clone(), asset, trade_id.clone(), None);
+            account_add(trade.to.clone(), asset, trade_id.clone(), None).await;
             if trade.status == TransferStatus::Succeeded {
-                account_modify(&trade.to, |account| account.income(asset as usize, trade.amount) );
+                account_modify(&trade.to, |account| account.income(asset as usize, trade.amount) ).await;
             }
         }
         TransferType::Pay=> {
-            account_add(trade.from.clone(), asset, trade_id.clone(), None);
-            account_add(trade.to.clone(), asset, trade_id.clone(), None);
+            account_add(trade.from.clone(), asset, trade_id.clone(), None).await;
+            account_add(trade.to.clone(), asset, trade_id.clone(), None).await;
             if trade.status == TransferStatus::Succeeded {
-                account_success(asset, &trade, false);
+                account_success(asset, &trade, false).await;
             } else if trade.status != TransferStatus::Failed {
-                account_start(asset, trade_id, &trade);
+                account_start(asset, trade_id, &trade).await;
             }
         }
         TransferType::Withdraw=> {
-            account_add(trade.from.clone(), asset, trade_id.clone(), None);
-            account_add(trade.to.clone(), asset, trade_id.clone(), None);
+            account_add(trade.from.clone(), asset, trade_id.clone(), None).await;
+            account_add(trade.to.clone(), asset, trade_id.clone(), None).await;
             if trade.status == TransferStatus::Succeeded {
-                account_success(asset, &trade, false);
+                account_success(asset, &trade, false).await;
             } else if trade.status != TransferStatus::Failed {
-                account_start(asset, trade_id, &trade);
+                account_start(asset, trade_id, &trade).await;
             }
         }
         TransferType::AirDrop=> {
-            account_add(trade.to, asset, trade_id.clone(), Some(trade.amount));
+            account_add(trade.to, asset, trade_id.clone(), Some(trade.amount)).await;
         }
         _=> {}
     }
@@ -231,17 +235,22 @@ pub(crate) fn add_trade(asset: u32, trade_id: StaticStr, trade: Trade) {        
 
 pub fn load_all()-> std::time::Duration {
     let start = std::time::Instant::now();
-    let mut threads = Vec::new();
+    let mut tasks = Vec::new();
     for asset in 0..trade::ASSET_NUM {
-        threads.push(std::thread::spawn(move || {
-            TRADES[asset].store.load_all(|id, trade: Trade| {
-                add_trade(asset as u32, id.clone(), trade.clone());
-                TRADES[asset].add_trade(id, trade);
-            }).unwrap();         
+        tasks.push(std::thread::spawn(move || {
+            let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+            TRADES[asset].store.load_all(move |id, trade: Trade| {
+                let id = id.clone();
+                let trade = trade.clone();
+                rt.block_on(async move {
+                    add_trade(asset as u32, id.clone(), trade.clone()).await;
+                    TRADES[asset].add_trade(id, trade).await;
+                });
+            }).unwrap();
         }));
     }
     
-    for t in threads {
+    for t in tasks {
         let _ = t.join();
     }
     std::time::Instant::now().duration_since(start)

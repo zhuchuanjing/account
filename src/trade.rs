@@ -1,7 +1,6 @@
 use scc::{HashMap, HashSet};
 use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
-use serde::de::DeserializeOwned;
 use std::borrow::Cow;
 
 pub type StaticStr = Cow<'static, str>;
@@ -80,13 +79,11 @@ impl Trade {
         Self{r#type: TransferType::Pay, status: TransferStatus::Pending, create_tick: chrono::Utc::now().timestamp(), update_tick: 0,
             amount, gas, from, to, hash, from_node: None, to_node: None, channel: None}
     }
-//充值订单 没有手续费 目的地是平台地址
-    pub fn fund(from: StaticStr, to: StaticStr, amount: u64, hash: StaticStr)-> Self {
+    pub fn fund(from: StaticStr, to: StaticStr, amount: u64, hash: StaticStr)-> Self {  //充值订单 没有手续费 目的地是平台地址
         Self{r#type: TransferType::Fund, status: TransferStatus::WaitBroadcast, create_tick: chrono::Utc::now().timestamp(), update_tick: 0,
             amount, gas: Vec::new(), from, to, hash, from_node: None, to_node: None, channel: None}
     }
-//生成 withdraw 交易 之前是需要分别生成 交易 rna 手续费 其他手续费三条订单记录 现在放在一条订单里面
-    pub fn withdraw(from: StaticStr, to: StaticStr, amount: u64, gas: Vec<GasInfo>, hash: StaticStr)-> Self {
+    pub fn withdraw(from: StaticStr, to: StaticStr, amount: u64, gas: Vec<GasInfo>, hash: StaticStr)-> Self {   //生成 withdraw 交易 之前是需要分别生成 交易 rna 手续费 其他手续费三条订单记录 现在放在一条订单里面
         Self{r#type: TransferType::Withdraw, status: TransferStatus::Pending, create_tick: chrono::Utc::now().timestamp(), update_tick: 0,
             amount, gas, from, to, hash, from_node: None, to_node: None, channel: None}
     }
@@ -95,6 +92,8 @@ impl Trade {
 static REDIS_URL: &'static str = "redis://127.0.0.1";
 use once_cell::sync::Lazy;
 use std::sync::Arc;
+use lockfree_object_pool::LinearObjectPool;
+use redis::{Connection, Commands};
 
 pub const ASSET_NUM: usize = 8;             //暂时支持最多8个资产
 pub const ASSET_NAMES: [&'static str; ASSET_NUM] = ["BTC_ASSET_ID", "rgb:7Yjbbk!p-Dl4GOJG-Z2ct!BU-yJ2Ji8I-z13MdSL-QAklonM",
@@ -105,12 +104,11 @@ pub const ASSET_NAMES: [&'static str; ASSET_NUM] = ["BTC_ASSET_ID", "rgb:7Yjbbk!
 pub static ASSET_JERRY: u32 = 5;
 pub static ASSET_RNA: u32 = 2;
 
-
 pub static TRADES: Lazy<Vec<Arc<TradeManager>>> = Lazy::new(|| {
     let pool = Arc::new(LinearObjectPool::<Connection>::new(move || {
         let client = redis::Client::open(REDIS_URL).map_err(|e| log::error!("{:?}", e) ).unwrap();
-        client.get_connection().map_err(|e| log::error!("{:?}", e) ).unwrap()
-    }, move |con| {}));
+        client.get_connection().unwrap()
+    }, move |_| {}));
 
     let mut trades = Vec::new();
     for name in ASSET_NAMES {
@@ -118,17 +116,6 @@ pub static TRADES: Lazy<Vec<Arc<TradeManager>>> = Lazy::new(|| {
     }
     trades
 });
-
-pub trait TradeStore<T: Serialize + DeserializeOwned + Clone + std::fmt::Debug> {
-    fn contains(&self, id: &StaticStr)-> bool;
-    fn insert(&self, id: &StaticStr, t: &T)-> bool;                                     //增加一条交易,如果已经存在则返回 false
-    fn update(&self, id: &StaticStr, value: &T)-> bool;
-    fn get(&self, id: &StaticStr)-> Option<T>;
-    fn load_all<F: Fn(StaticStr, T)>(&self, f: F)-> Result<()>;
-}
-
-use lockfree_object_pool::LinearObjectPool;
-use redis::{Connection, Commands};
 
 pub struct RedisStore {
     list_key: StaticStr,
@@ -142,15 +129,19 @@ impl RedisStore {
         let trades_key = Cow::from(format!("@trades::{}", name));
         Self{list_key, trades_key, pool}
     }
-}
 
-impl<T: Serialize + DeserializeOwned + Clone + std::fmt::Debug> TradeStore<T> for RedisStore {
-    fn contains(&self, id: &StaticStr)-> bool {
+    pub(crate) fn clean_up(&self) {
+        let mut c = self.pool.pull();
+        let _ = c.del::<&str, bool>(self.list_key.as_ref());
+        let _ = c.del::<&str, bool>(self.trades_key.as_ref());
+    }
+
+    pub(crate) fn contains(&self, id: &StaticStr)-> bool {
         let mut c = self.pool.pull();
         c.hexists(self.trades_key.as_ref(), id).unwrap_or(false)
     }
 
-    fn insert(&self, id: &StaticStr, t: &T)-> bool {
+    pub(crate) fn insert(&self, id: &StaticStr, t: &Trade)-> bool {
         let mut c = self.pool.pull();
         if c.hexists(self.trades_key.as_ref(), id).unwrap_or(false) {
             return false;
@@ -162,21 +153,21 @@ impl<T: Serialize + DeserializeOwned + Clone + std::fmt::Debug> TradeStore<T> fo
         }
     }
 
-    fn update(&self, id: &StaticStr, value: &T)-> bool {       //内存保证多个线程不会同时更新
+    fn update(&self, id: &StaticStr, value: &Trade)-> bool {       //内存保证多个线程不会同时更新
         let mut c = self.pool.pull();
         c.hset(self.trades_key.as_ref(), id, rmp_serde::to_vec(&value).unwrap()).unwrap_or(false)
     }
 
-    fn get(&self, id: &StaticStr)-> Option<T> {
+    fn get(&self, id: &StaticStr)-> Option<Trade> {
         let mut c = self.pool.pull();
-        c.hget::<&str, &str, Vec<u8>>(self.trades_key.as_ref(), id).ok().and_then(|buf| rmp_serde::from_slice::<T>(&buf).ok() )
+        c.hget::<&str, &str, Vec<u8>>(self.trades_key.as_ref(), id).ok().and_then(|buf| rmp_serde::from_slice::<Trade>(&buf).ok() )
     }
 
-    fn load_all<F: FnMut(StaticStr, T)>(&self, mut f: F)-> Result<()> {
+    pub(crate) fn load_all<F: FnMut(StaticStr, Trade)>(&self, mut f: F)-> Result<()> {
         let mut c = self.pool.pull();
         let keys: Vec<String> = c.lrange(self.list_key.as_ref(), 0, -1)?;
         for key in keys {
-            if let Some(trade) = c.hget::<&str, &str, Vec<u8>>(self.trades_key.as_ref(), &key).ok().and_then(|buf| rmp_serde::from_slice::<T>(&buf).ok() ) {
+            if let Some(trade) = c.hget::<&str, &str, Vec<u8>>(self.trades_key.as_ref(), &key).ok().and_then(|buf| rmp_serde::from_slice::<Trade>(&buf).ok() ) {
                 f(Cow::from(key), trade);    
             }
         }
@@ -194,36 +185,36 @@ impl TradeManager {
     pub fn new(pool: Arc<LinearObjectPool::<Connection>>, name: StaticStr)-> Self {
         Self{trades: HashMap::default(), approving: HashSet::default(), store: RedisStore::new( name, pool)}
     }
-    pub fn trade(&self, id: &StaticStr)-> Option<Trade> {
-        self.trades.get(id).map(|t| t.clone() )
+    pub async fn trade(&self, id: &StaticStr)-> Option<Trade> {
+        self.trades.get_async(id).await.map(|t| t.clone() )
     }
 
-    pub fn contains(&self, trade_id: &StaticStr)-> bool {
-        self.trades.contains(trade_id)
+    pub async fn contains(&self, trade_id: &StaticStr)-> bool {
+        self.trades.contains_async(trade_id).await
     }
-    pub fn add_trade(&self, trade_id: StaticStr, trade: Trade) {
+    pub(crate) async fn add_trade(&self, trade_id: StaticStr, trade: Trade) {
         if trade.status == TransferStatus::Approving {
             self.approving.insert(trade_id.clone()).unwrap();
         }
-        let _ = self.trades.insert(trade_id, trade);
+        let _ = self.trades.insert_async(trade_id, trade).await;
     }
-    pub fn insert(&self, trade_id: StaticStr, trade: Trade)-> Result<()> {
+    pub async fn insert(&self, trade_id: StaticStr, trade: Trade)-> Result<()> {
         if self.store.insert(&trade_id, &trade) {
-            self.add_trade(trade_id, trade);
+            self.add_trade(trade_id, trade).await;
         }
         Ok(())
     }
-    pub fn update<F: Fn(Trade)-> Option<Trade>>(&self, trade_id: StaticStr, f: F)-> Option<Trade> {
-        self.trades.update(&trade_id, |k, v| {
+    pub async fn update<F: Fn(Trade)-> Option<Trade>>(&self, trade_id: StaticStr, f: F)-> Option<Trade> {
+        self.trades.update_async(&trade_id, |k, v| {
             if let Some(updated) = f(v.clone()) {
                 if self.store.update(&trade_id, &updated) {
                     if v.status == TransferStatus::Approving && updated.status != TransferStatus::Approving {
-                        let _ = self.approving.insert(k.clone());
-                        return std::mem::replace(v, updated);
+                        let _ = self.approving.remove(k);
                     }
+                    return std::mem::replace(v, updated);
                 }
             }
             v.clone()
-        })
+        }).await
     }
 }

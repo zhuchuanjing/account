@@ -1,6 +1,6 @@
 use crate::trade;
 
-use super::trade::{TransferType, TransferStatus, Trade, StaticStr, TRADES, TradeStore};
+use super::trade::{TransferType, TransferStatus, Trade, StaticStr, TRADES};
 
 const STATUSS: [(&'static str, TransferStatus); 5] = [("Approving", TransferStatus::Approving), ("WaitBroadcast", TransferStatus::WaitBroadcast), ("Pending", TransferStatus::Pending), ("Succeeded", TransferStatus::Succeeded), ("Failed", TransferStatus::Failed)];
 const TYPES: [(&'static str, TransferType); 6] = [("NodeFund", TransferType::NodeFund), ("Fund", TransferType::Fund), ("Withdraw", TransferType::Withdraw), ("NodeWithdraw", TransferType::NodeWithdraw), ("Pay", TransferType::Pay), ("Gas", TransferType::Gas)];
@@ -14,18 +14,12 @@ pub fn get_type(key: &str)-> Option<TransferType> {
 }
 
 use anyhow::{anyhow, Result};
-use mysql::*;
-use mysql::prelude::*;
-use serde::{Deserialize, Serialize};
 use chrono::NaiveDateTime;
-use chrono::{DateTime, Utc, TimeZone};
 use std::borrow::Cow;
 
 pub fn import_trade(asset: u32, trade_id: StaticStr, trade: Trade)-> bool {
-    if !TRADES[asset as usize].contains(&trade_id) {
+    if !TRADES[asset as usize].store.contains(&trade_id) {
         TRADES[asset as usize].store.insert(&trade_id, &trade);
-        super::add_trade(asset as u32, trade_id.clone(), trade.clone());
-        TRADES[asset as usize].add_trade(trade_id, trade);
         true
     } else { false }
 }
@@ -41,7 +35,7 @@ pub fn load_air_drop(row: mysql::Row)-> Result<bool> {
     Ok(import_trade(trade::ASSET_RNA, Cow::from(format!("air_drop_rna-{}", id)), trade))
 }
 
-pub fn load_mysql_row(row: mysql::Row)-> Result<()> {
+pub fn load_mysql_row(row: mysql::Row)-> Result<bool> {
     let tid = row.get::<String, &str>("transfer_id").ok_or(anyhow!("no transfer_id"))?;
     let asset = row.get::<String, &str>("transfer_asset_id").ok_or(anyhow!("no asset_id")).and_then(|asset_name| super::get_asset_id(&asset_name) )?;
     let created = row.get::<String, &str>("created_at").and_then(|dt| NaiveDateTime::parse_from_str(&dt, "%Y-%m-%d %H:%M:%S").ok() ).map(|dt| dt.and_utc().timestamp() ).unwrap_or(0);
@@ -59,7 +53,7 @@ pub fn load_mysql_row(row: mysql::Row)-> Result<()> {
                 trade.create_tick = created;
                 trade.status = status;
                 if import_trade(asset as u32, Cow::from(tid.clone()), trade) {
-                    return Ok(());
+                    return Ok(true);
                 }
             }
             TransferType::Pay=> {
@@ -70,7 +64,7 @@ pub fn load_mysql_row(row: mysql::Row)-> Result<()> {
                 trade.create_tick = created;
                 trade.status = status;
                 if import_trade(asset as u32, Cow::from(tid.clone()), trade) {
-                    return Ok(());
+                    return Ok(true);
                 }
             }
             TransferType::Gas=> {
@@ -81,7 +75,7 @@ pub fn load_mysql_row(row: mysql::Row)-> Result<()> {
                 trade.create_tick = created;
                 trade.status = status;
                 if import_trade(asset as u32, Cow::from(tid.clone()), trade) {
-                    return Ok(());
+                    return Ok(true);
                 }
             }
             TransferType::Withdraw=> {
@@ -92,7 +86,7 @@ pub fn load_mysql_row(row: mysql::Row)-> Result<()> {
                 trade.create_tick = created;
                 trade.status = status;
                 if import_trade(asset as u32, Cow::from(tid.clone()), trade) {
-                    return Ok(());
+                    return Ok(true);
                 }
             }
             _=> {
@@ -100,5 +94,9 @@ pub fn load_mysql_row(row: mysql::Row)-> Result<()> {
             }    
         }
     }
-    Ok(())
+    Ok(false)
+}
+
+pub fn clean_up() {         //清除所有 key 谨慎使用
+    TRADES.iter().for_each(|t| t.store.clean_up() );   
 }
