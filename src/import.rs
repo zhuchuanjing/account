@@ -95,8 +95,11 @@ pub fn load_mysql_row(row: mysql::Row)-> Result<bool> {
         }
     }
     Ok(false)
+<<<<<<< HEAD
 }
 
 pub fn clean_up() {         //清除所有 key 谨慎使用
     TRADES.iter().for_each(|t| t.store.clean_up() );   
+=======
+>>>>>>> e07c42eee0b10185a465862ef603c5d2f1d30bb3
 }
