@@ -24,8 +24,8 @@ use std::borrow::Cow;
 pub fn import_trade(asset: u32, trade_id: StaticStr, trade: Trade)-> bool {
     if !TRADES[asset as usize].contains(&trade_id) {
         TRADES[asset as usize].store.insert(&trade_id, &trade);
-        super::add_trade(asset as u32, trade_id.clone(), trade.clone());
-        TRADES[asset as usize].add_trade(trade_id, trade);
+        //super::add_trade(asset as u32, trade_id.clone(), trade.clone());
+        //TRADES[asset as usize].add_trade(trade_id, trade);
         true
     } else { false }
 }
@@ -41,7 +41,7 @@ pub fn load_air_drop(row: mysql::Row)-> Result<bool> {
     Ok(import_trade(trade::ASSET_RNA, Cow::from(format!("air_drop_rna-{}", id)), trade))
 }
 
-pub fn load_mysql_row(row: mysql::Row)-> Result<()> {
+pub fn load_mysql_row(row: mysql::Row)-> Result<bool> {
     let tid = row.get::<String, &str>("transfer_id").ok_or(anyhow!("no transfer_id"))?;
     let asset = row.get::<String, &str>("transfer_asset_id").ok_or(anyhow!("no asset_id")).and_then(|asset_name| super::get_asset_id(&asset_name) )?;
     let created = row.get::<String, &str>("created_at").and_then(|dt| NaiveDateTime::parse_from_str(&dt, "%Y-%m-%d %H:%M:%S").ok() ).map(|dt| dt.and_utc().timestamp() ).unwrap_or(0);
@@ -59,7 +59,7 @@ pub fn load_mysql_row(row: mysql::Row)-> Result<()> {
                 trade.create_tick = created;
                 trade.status = status;
                 if import_trade(asset as u32, Cow::from(tid.clone()), trade) {
-                    return Ok(());
+                    return Ok(true);
                 }
             }
             TransferType::Pay=> {
@@ -70,7 +70,7 @@ pub fn load_mysql_row(row: mysql::Row)-> Result<()> {
                 trade.create_tick = created;
                 trade.status = status;
                 if import_trade(asset as u32, Cow::from(tid.clone()), trade) {
-                    return Ok(());
+                    return Ok(true);
                 }
             }
             TransferType::Gas=> {
@@ -81,7 +81,7 @@ pub fn load_mysql_row(row: mysql::Row)-> Result<()> {
                 trade.create_tick = created;
                 trade.status = status;
                 if import_trade(asset as u32, Cow::from(tid.clone()), trade) {
-                    return Ok(());
+                    return Ok(true);
                 }
             }
             TransferType::Withdraw=> {
@@ -92,7 +92,7 @@ pub fn load_mysql_row(row: mysql::Row)-> Result<()> {
                 trade.create_tick = created;
                 trade.status = status;
                 if import_trade(asset as u32, Cow::from(tid.clone()), trade) {
-                    return Ok(());
+                    return Ok(true);
                 }
             }
             _=> {
@@ -100,5 +100,5 @@ pub fn load_mysql_row(row: mysql::Row)-> Result<()> {
             }    
         }
     }
-    Ok(())
+    Ok(false)
 }
