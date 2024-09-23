@@ -74,10 +74,15 @@ fn account_modify<F: FnOnce(&mut Account)-> bool>(account: &StaticStr, f: F)-> b
     ACCOUNTS.update(account, |_, account| f(account) ).unwrap_or(false)
 }
 
-fn account_add(account: StaticStr, asset: u32, trade_id: StaticStr) {       //用于转账接收方或者充值方 如果账号不存在则创建一个
+fn account_add(account: StaticStr, asset: u32, trade_id: StaticStr, amount: Option<u64>) {       //用于转账接收方或者充值方 如果账号不存在则创建一个
     ACCOUNTS.entry(account).and_modify(|account| {
+        amount.map(|amount| account.amounts[asset as usize].0 += amount );
         account.trades.push((asset, trade_id.clone()));
-    }).or_insert(Account{amounts: [(0,0), (0,0), (0,0), (0,0), (0,0), (0,0), (0,0), (0,0)], trades: vec![(asset, trade_id)]});
+    }).or_insert({
+        let mut account = Account{amounts: [(0,0), (0,0), (0,0), (0,0), (0,0), (0,0), (0,0), (0,0)], trades: vec![(asset, trade_id)]};
+        amount.map(|amount| account.amounts[asset as usize].0 += amount );
+        account
+    });
 }
 
 fn account_start(asset: u32, trade_id: StaticStr, trade: &Trade)-> bool {       //创建一笔转账或者提现交易
@@ -134,7 +139,7 @@ pub fn add_fund(asset: u32, trade_id: StaticStr, from: StaticStr, to: StaticStr,
     if TRADES[asset as usize].contains(&trade_id) { return Err(anyhow!("trade {} existed", trade_id )); }
     let trade = Trade::fund(from, to.clone(), amount, hash);
     let _ = TRADES[asset as usize].insert(trade_id.clone(), trade.clone());
-    account_add(to, asset, trade_id);
+    account_add(to, asset, trade_id, None);
     Ok(())
 }
 
@@ -150,7 +155,7 @@ pub fn add_pay(asset: u32, trade_id: StaticStr, from: StaticStr, to: StaticStr, 
     if TRADES[asset as usize].contains(&trade_id) { return Err(anyhow!("trade {} existed", trade_id )); }
     let trade = Trade::pay(from, to, amount, gas, hash);
     if account_start(asset, trade_id.clone(), &trade) {
-        account_add(trade.to.clone(), asset, trade_id.clone());
+        account_add(trade.to.clone(), asset, trade_id.clone(), None);
         let _ = TRADES[asset as usize].insert(trade_id, trade);
         Ok(())
     } else { Err(anyhow!("{} have no enough amount", trade.from)) }
@@ -194,14 +199,14 @@ pub fn complete_withdraw(asset: u32, trade_id: StaticStr, success: bool)-> bool 
 pub(crate) fn add_trade(asset: u32, trade_id: StaticStr, trade: Trade) {           //加载初始化的数据, 
     match trade.r#type {
         TransferType::Fund=> {
-            account_add(trade.to.clone(), asset, trade_id.clone());
+            account_add(trade.to.clone(), asset, trade_id.clone(), None);
             if trade.status == TransferStatus::Succeeded {
                 account_modify(&trade.to, |account| account.income(asset as usize, trade.amount) );
             }
         }
         TransferType::Pay=> {
-            account_add(trade.from.clone(), asset, trade_id.clone());
-            account_add(trade.to.clone(), asset, trade_id.clone());
+            account_add(trade.from.clone(), asset, trade_id.clone(), None);
+            account_add(trade.to.clone(), asset, trade_id.clone(), None);
             if trade.status == TransferStatus::Succeeded {
                 account_success(asset, &trade, false);
             } else if trade.status != TransferStatus::Failed {
@@ -209,8 +214,8 @@ pub(crate) fn add_trade(asset: u32, trade_id: StaticStr, trade: Trade) {        
             }
         }
         TransferType::Withdraw=> {
-            account_add(trade.from.clone(), asset, trade_id.clone());
-            account_add(trade.to.clone(), asset, trade_id.clone());
+            account_add(trade.from.clone(), asset, trade_id.clone(), None);
+            account_add(trade.to.clone(), asset, trade_id.clone(), None);
             if trade.status == TransferStatus::Succeeded {
                 account_success(asset, &trade, false);
             } else if trade.status != TransferStatus::Failed {
@@ -218,7 +223,7 @@ pub(crate) fn add_trade(asset: u32, trade_id: StaticStr, trade: Trade) {        
             }
         }
         TransferType::AirDrop=> {
-            account_modify(&trade.to, |account| account.income(asset as usize, trade.amount) );
+            account_add(trade.to, asset, trade_id.clone(), Some(trade.amount));
         }
         _=> {}
     }

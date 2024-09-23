@@ -30,7 +30,7 @@ pub fn import_trade(asset: u32, trade_id: StaticStr, trade: Trade)-> bool {
     } else { false }
 }
 
-pub fn load_air_drop(row: mysql::Row)-> Result<()> {
+pub fn load_air_drop(row: mysql::Row)-> Result<bool> {
     let id = row.get::<u64, &str>("id").ok_or(anyhow!("no id"))?;
     let address = Cow::from(row.get::<String, &str>("address").ok_or(anyhow!("no address"))?);
     let number = row.get::<u64, &str>("had_drop_number").ok_or(anyhow!("no had_drop_number"))?;
@@ -38,8 +38,7 @@ pub fn load_air_drop(row: mysql::Row)-> Result<()> {
     let _= import_trade(trade::ASSET_JERRY, Cow::from(format!("air_drop_jerry-{}", id)), trade);
     let gas = row.get::<u64, &str>("had_drop_gas_number").ok_or(anyhow!("no had_drop_gas_number"))?;
     let trade = Trade::airdrop(address, gas);
-    let _= import_trade(trade::ASSET_RNA, Cow::from(format!("air_drop_rna-{}", id)), trade);
-    Ok(())
+    Ok(import_trade(trade::ASSET_RNA, Cow::from(format!("air_drop_rna-{}", id)), trade))
 }
 
 pub fn load_mysql_row(row: mysql::Row)-> Result<()> {
