@@ -163,8 +163,11 @@ impl RedisStore {
     pub(crate) fn load_all<F: FnMut(StaticStr, Trade)>(&self, mut f: F)-> Result<()> {
         let mut c = self.pool.pull();
         let keys: Vec<String> = c.lrange(self.list_key.as_ref(), 0, -1)?;
+        log::info!("{} len {}", self.list_key, keys.len());
+        let kvs: std::collections::BTreeMap<String, Vec<u8>> = c.hgetall(&self.trades_key)?;
+        log::info!("{} len {}", self.trades_key, kvs.len());
         for key in keys {
-            if let Some(trade) = c.hget::<&str, &str, Vec<u8>>(self.trades_key.as_ref(), &key).ok().and_then(|buf| rmp_serde::from_slice::<Trade>(&buf).ok() ) {
+            if let Some(trade) = kvs.get(&key).and_then(|buf| rmp_serde::from_slice::<Trade>(&buf).ok() ) {
                 f(Cow::from(key), trade);    
             }
         }
