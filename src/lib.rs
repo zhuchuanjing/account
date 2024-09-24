@@ -236,9 +236,9 @@ pub fn load_all()-> std::time::Duration {
         tasks.push(std::thread::spawn(move || {
             let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
             TRADES[asset].store.load_all(move |id, trade: Trade| {
-                let id = id.clone();
-                let trade = trade.clone();
-                rt.block_on(async move {            //同一个 asset 的插入顺序需要保证 所以创建一个 runtime 阻塞方式插入记录
+                //let id = id.clone();
+                //let trade = trade.clone();
+                rt.block_on(async move {            //同一个 asset 的插入顺序需要保证 所以创建一个 runtime
                     TRADES[asset].add_trade(id.clone(), trade.clone()).await;
                     add_trade(asset as u32, id, trade).await;
                 });
