@@ -70,10 +70,6 @@ use std::sync::Arc;
 static ACCOUNTS: Lazy<Arc<HashMap<StaticStr, Account>>> = Lazy::new(|| Arc::new(HashMap::default()) );
 pub static WARNINGS: Lazy<Arc<HashSet<(u32, StaticStr)>>> = Lazy::new(|| Arc::new(HashSet::default()) );
 
-/*fn account_modify<F: FnOnce(&mut Account)-> bool>(account: &StaticStr, f: F)-> bool {                                           //充值或者转账到账
-    ACCOUNTS.update(account, |_, account| f(account) ).unwrap_or(false)
-}*/
-
 async fn account_modify<F: FnOnce(&mut Account)-> bool>(account: &StaticStr, f: F)-> bool {
     ACCOUNTS.update_async(account, |_, account| f(account) ).await.unwrap_or(false)
 }
@@ -104,7 +100,7 @@ async fn account_success(asset: u32, trade: &Trade, with_lock: bool)-> bool {   
             account.confirm(asset as usize, &trade)
         } else {
             if !account.decrease(asset as usize, &trade) {
-                log::error!("debit {} {} {}", ASSET_NAMES[asset as usize], trade.from, trade.amount);
+                log::error!("debit {} {:?}", ASSET_NAMES[asset as usize], trade);
                 let _ = WARNINGS.insert((asset, trade.from.clone()));
             }
             true

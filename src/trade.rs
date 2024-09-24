@@ -143,9 +143,6 @@ impl RedisStore {
 
     pub(crate) fn insert(&self, id: &StaticStr, t: &Trade)-> bool {
         let mut c = self.pool.pull();
-        if c.hexists(self.trades_key.as_ref(), id).unwrap_or(false) {
-            return false;
-        }
         if c.hset(self.trades_key.as_ref(), id, rmp_serde::to_vec(&t).unwrap()).unwrap_or(false) {
             c.rpush(self.list_key.as_ref(), id).unwrap_or(false)
         } else {
