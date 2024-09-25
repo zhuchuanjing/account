@@ -160,7 +160,7 @@ pub async fn add_pay(asset: u32, trade_id: StaticStr, from: StaticStr, to: Stati
     let trade = Trade::pay(from, to, amount, gas, hash);
     if account_start(asset, trade_id.clone(), &trade).await {
         account_add(trade.to.clone(), asset, trade_id.clone(), None).await;
-        let _ = TRADES[asset as usize].insert(trade_id, trade);
+        let _ = TRADES[asset as usize].insert(trade_id, trade).await;
         Ok(())
     } else { Err(anyhow!("{} have no enough amount", trade.from)) }
 }
