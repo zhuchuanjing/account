@@ -101,6 +101,7 @@ pub const ASSET_NAMES: [&'static str; ASSET_NUM] = ["BTC_ASSET_ID", "rgb:7Yjbbk!
     "rgb:!BmcPbfz-BpQWa0Q-qsmVlp0-VV12tvx-I2WkNz3-D!dGFmw", "rgb:RspPWEW9-mzuSNHQ-dGCb054-bLjHPYi-$I9$Ih2-Fy9vxFU",
     "rgb:VNyUso5w-6rx1FoB-kODxlFs-$Ej0BJP-aIsyDMs-acdufQs", "_reserved_2"];
 
+pub static WITHDRAW_ADDR: &'static str = "use_to_receive_withdraw_asset"; 
 pub static ASSET_JERRY: u32 = 5;
 pub static ASSET_RNA: u32 = 2;
 

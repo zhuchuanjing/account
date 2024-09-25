@@ -1,6 +1,6 @@
 pub mod trade;
 pub mod import;
-use trade::{StaticStr, Trade, GasInfo};
+use trade::{GasInfo, StaticStr, Trade, WITHDRAW_ADDR};
 use scc::{HashMap, HashSet};
 
 #[derive(Clone, Debug)]
@@ -108,8 +108,12 @@ async fn account_success(asset: u32, trade: &Trade, with_lock: bool)-> bool {   
     }).await {
         for g in &trade.gas {
             account_modify(&g.to, |account| account.income(g.asset as usize, g.amount) ).await;
-        }    
-        account_modify(&trade.to, |account| account.income(asset as usize, trade.amount) ).await
+        }
+        if trade.r#type == TransferType::Withdraw && trade.from == trade.to {
+            account_modify(&std::borrow::Cow::from(WITHDRAW_ADDR), |account| account.income(asset as usize, trade.amount) ).await
+        } else {    
+            account_modify(&trade.to, |account| account.income(asset as usize, trade.amount) ).await
+        }
     } else { false }           
 }
 
@@ -215,7 +219,9 @@ pub(crate) async fn add_trade(asset: u32, trade_id: StaticStr, trade: Trade) {  
         }
         TransferType::Withdraw=> {
             account_add(trade.from.clone(), asset, trade_id.clone(), None).await;
-            account_add(trade.to.clone(), asset, trade_id.clone(), None).await;
+            if trade.to != trade.from {
+                account_add(trade.to.clone(), asset, trade_id.clone(), None).await;    
+            }
             if trade.status == TransferStatus::Succeeded {
                 account_success(asset, &trade, false).await;
             } else if trade.status != TransferStatus::Failed {

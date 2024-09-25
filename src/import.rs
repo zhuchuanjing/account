@@ -1,4 +1,4 @@
-use crate::trade;
+use crate::trade::{self, ASSET_RNA};
 
 use super::trade::{TransferType, TransferStatus, Trade, StaticStr, TRADES};
 
@@ -63,6 +63,10 @@ pub fn load_mysql_row(row: mysql::Row)-> Result<bool> {
                 trade.update_tick = updated;
                 trade.create_tick = created;
                 trade.status = status;
+                if asset as u32 == ASSET_RNA {  // !!!@@@@@ rna 交易 所有的 gas 需要在 amount 里面单独扣除
+                    let gas_amount = row.get::<u64, &str>("gas_amount").unwrap_or(0);
+                    trade.amount -= gas_amount;
+                }
                 if import_trade(asset as u32, Cow::from(tid.clone()), trade) {
                     return Ok(true);
                 }
