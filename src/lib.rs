@@ -128,13 +128,16 @@ pub async fn get_amount(account: &StaticStr)-> Option<[(u64, u64); ASSET_NUM]>{
     ACCOUNTS.get_async(account).await.map(|account| account.amounts )
 }
 
-pub async fn get_trades(asset: u32, account: &StaticStr)-> Vec<(StaticStr, Trade)>{
+pub async fn get_trades(asset: u32, account: &StaticStr, descend: bool)-> Vec<(StaticStr, Trade)>{
     let ids = ACCOUNTS.get(account).map(|account| {
         account.trades.iter().filter_map(|t| if t.0 == asset { Some(t.1.clone()) } else { None }).collect()
     }).unwrap_or(Vec::new());
     let mut trades = Vec::new();
     for id in ids {
         TRADES[asset as usize].trade(&id).await.map(|t| trades.push((id.clone(), t)) );
+    }
+    if descend {
+        trades.sort_by_key(|trade| trade.1.create_tick );
     }
     trades
 }
