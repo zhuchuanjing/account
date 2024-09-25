@@ -1,6 +1,6 @@
 pub mod trade;
 pub mod import;
-use trade::{GasInfo, StaticStr, Trade, WITHDRAW_ADDR};
+use trade::{GasInfo, StaticStr, Trade, ASSET_RNA, WITHDRAW_ADDR};
 use scc::{HashMap, HashSet};
 
 #[derive(Clone, Debug)]
@@ -205,7 +205,7 @@ pub async fn complete_withdraw(asset: u32, trade_id: StaticStr, success: bool)->
 
 pub(crate) async fn add_trade(asset: u32, trade_id: StaticStr, trade: Trade) {           //加载初始化的数据, 
     match trade.r#type {
-        TransferType::Fund=> {
+        TransferType::Fund=> {                                                          //充值来自与 level 1 所以不需要扣除 trade.from 的资产
             account_add(trade.to.clone(), asset, trade_id.clone(), None).await;
             if trade.status == TransferStatus::Succeeded {
                 account_modify(&trade.to, |account| account.income(asset as usize, trade.amount) ).await;

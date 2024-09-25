@@ -36,8 +36,8 @@ pub fn load_air_drop(row: mysql::Row)-> Result<bool> {
 }
 
 pub fn load_mysql_row(row: mysql::Row)-> Result<bool> {
-    let tid = row.get::<String, &str>("transfer_id").ok_or(anyhow!("no transfer_id"))?;
-    let asset = row.get::<String, &str>("transfer_asset_id").ok_or(anyhow!("no asset_id")).and_then(|asset_name| super::get_asset_id(&asset_name) )?;
+    let tid = row.get::<String, &str>("transfer_id").ok_or(anyhow!("no transfer_id"))?.trim().to_string();
+    let asset = row.get::<String, &str>("transfer_asset_id").ok_or(anyhow!("no asset_id")).and_then(|asset_name| super::get_asset_id(asset_name.trim()) )?;
     let created = row.get::<String, &str>("created_at").and_then(|dt| NaiveDateTime::parse_from_str(&dt, "%Y-%m-%d %H:%M:%S").ok() ).map(|dt| dt.and_utc().timestamp() ).unwrap_or(0);
     let updated = row.get::<String, &str>("updated_at").and_then(|dt| NaiveDateTime::parse_from_str(&dt, "%Y-%m-%d %H:%M:%S").ok() ).map(|dt| dt.and_utc().timestamp() ).unwrap_or(0);
     let status = row.get::<String, &str>("transfer_status").and_then(|t| get_status(&t) ).ok_or(anyhow!("unknow status"))?;
@@ -46,8 +46,8 @@ pub fn load_mysql_row(row: mysql::Row)-> Result<bool> {
     if let Some(transfer_type) = row.get::<String, &str>("transfer_type").and_then(|t| get_type(&t) ) {
         match transfer_type {
             TransferType::Fund=> {
-                let from = row.get::<String, &str>("from_address").ok_or(anyhow!("no from_address"))?;      //这个是存入的地址 我的天啊!@!!@!!
-                let to = row.get::<String, &str>("to_address").ok_or(anyhow!("no to_address"))?;            //这个没有使用
+                let from = row.get::<String, &str>("from_address").ok_or(anyhow!("no from_address"))?.trim().to_string();      //这个是存入的地址 我的天啊!@!!@!!
+                let to = row.get::<String, &str>("to_address").ok_or(anyhow!("no to_address"))?.trim().to_string();            //这个没有使用
                 let mut trade = Trade::fund(Cow::from(to), Cow::from(from), amount, Cow::from(hash));
                 trade.update_tick = updated;
                 trade.create_tick = created;
@@ -57,23 +57,19 @@ pub fn load_mysql_row(row: mysql::Row)-> Result<bool> {
                 }
             }
             TransferType::Pay=> {
-                let from = row.get::<String, &str>("from_address").ok_or(anyhow!("no from_address"))?;
-                let to = row.get::<String, &str>("to_address").ok_or(anyhow!("no to_address"))?;
+                let from = row.get::<String, &str>("from_address").ok_or(anyhow!("no from_address"))?.trim().to_string();
+                let to = row.get::<String, &str>("to_address").ok_or(anyhow!("no to_address"))?.trim().to_string();
                 let mut trade = Trade::pay(Cow::from(from), Cow::from(to), amount, Vec::new(), Cow::from(hash));
                 trade.update_tick = updated;
                 trade.create_tick = created;
                 trade.status = status;
-                if asset as u32 == ASSET_RNA {  // !!!@@@@@ rna 交易 所有的 gas 需要在 amount 里面单独扣除
-                    let gas_amount = row.get::<u64, &str>("gas_amount").unwrap_or(0);
-                    trade.amount -= gas_amount;
-                }
                 if import_trade(asset as u32, Cow::from(tid.clone()), trade) {
                     return Ok(true);
                 }
             }
             TransferType::Gas=> {
-                let from = row.get::<String, &str>("from_address").ok_or(anyhow!("no from_address"))?;
-                let to = row.get::<String, &str>("to_address").ok_or(anyhow!("no to_address"))?;
+                let from = row.get::<String, &str>("from_address").ok_or(anyhow!("no from_address"))?.trim().to_string();
+                let to = row.get::<String, &str>("to_address").ok_or(anyhow!("no to_address"))?.trim().to_string();
                 let mut trade = Trade::gas(Cow::from(from), Cow::from(to), amount);
                 trade.update_tick = updated;
                 trade.create_tick = created;
@@ -83,8 +79,8 @@ pub fn load_mysql_row(row: mysql::Row)-> Result<bool> {
                 }
             }
             TransferType::Withdraw=> {
-                let from = row.get::<String, &str>("from_address").ok_or(anyhow!("no from_address"))?;
-                let to = row.get::<String, &str>("to_address").ok_or(anyhow!("no to_address"))?;
+                let from = row.get::<String, &str>("from_address").ok_or(anyhow!("no from_address"))?.trim().to_string();
+                let to = row.get::<String, &str>("to_address").ok_or(anyhow!("no to_address"))?.trim().to_string();
                 let mut trade = Trade::withdraw(Cow::from(from), Cow::from(to), amount, Vec::new(), Cow::from(hash));
                 trade.update_tick = updated;
                 trade.create_tick = created;
