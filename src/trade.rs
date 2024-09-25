@@ -71,10 +71,6 @@ impl Trade {
 }
 
 impl Trade {
-    pub fn airdrop(to: StaticStr, amount: u64)-> Self {
-        Self{r#type: TransferType::AirDrop, status: TransferStatus::Succeeded, create_tick: chrono::Utc::now().timestamp(), update_tick: 0,
-            amount, gas: Vec::new(), from: Cow::from(""), to, hash: Cow::from(""), from_node: None, to_node: None, channel: None}
-    }
     pub fn pay(from: StaticStr, to: StaticStr, amount: u64, gas: Vec<GasInfo>, hash: StaticStr)-> Self {
         Self{r#type: TransferType::Pay, status: TransferStatus::Pending, create_tick: chrono::Utc::now().timestamp(), update_tick: 0,
             amount, gas, from, to, hash, from_node: None, to_node: None, channel: None}
@@ -86,6 +82,14 @@ impl Trade {
     pub fn withdraw(from: StaticStr, to: StaticStr, amount: u64, gas: Vec<GasInfo>, hash: StaticStr)-> Self {   //生成 withdraw 交易 之前是需要分别生成 交易 rna 手续费 其他手续费三条订单记录 现在放在一条订单里面
         Self{r#type: TransferType::Withdraw, status: TransferStatus::Pending, create_tick: chrono::Utc::now().timestamp(), update_tick: 0,
             amount, gas, from, to, hash, from_node: None, to_node: None, channel: None}
+    }
+    pub(crate) fn airdrop(to: StaticStr, amount: u64)-> Self {  //仅用于导入历史数据
+        Self{r#type: TransferType::AirDrop, status: TransferStatus::Succeeded, create_tick: chrono::Utc::now().timestamp(), update_tick: 0,
+            amount, gas: Vec::new(), from: Cow::from(""), to, hash: Cow::from(""), from_node: None, to_node: None, channel: None}
+    }
+    pub(crate) fn gas(from: StaticStr, to: StaticStr, amount: u64)-> Self {      //仅用于导入历史数据
+        Self{r#type: TransferType::Gas, status: TransferStatus::Succeeded, create_tick: chrono::Utc::now().timestamp(), update_tick: 0,
+            amount, gas: Vec::new(), from, to, hash: Cow::from(""), from_node: None, to_node: None, channel: None}
     }
 }
 
@@ -102,7 +106,7 @@ pub const ASSET_NAMES: [&'static str; ASSET_NUM] = ["BTC_ASSET_ID", "rgb:7Yjbbk!
     "rgb:VNyUso5w-6rx1FoB-kODxlFs-$Ej0BJP-aIsyDMs-acdufQs", "_reserved_2"];
 
 pub static WITHDRAW_ADDR: &'static str = "use_to_receive_withdraw_asset";
-pub static GAS_RECEIVE_ADDR: &'static str = "use_to_receive_gas_asset";
+pub static GAS_RECEIVE_ADDR: &'static str = "bc1qljz0dldnml3y897n68jxtnycyy62szlpn2mh9a";
 
 pub static ASSET_JERRY: u32 = 5;
 pub static ASSET_RNA: u32 = 2;

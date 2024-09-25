@@ -63,14 +63,6 @@ pub fn load_mysql_row(row: mysql::Row)-> Result<bool> {
                 trade.update_tick = updated;
                 trade.create_tick = created;
                 trade.status = status;
-                if asset as u32 == ASSET_RNA {  // !!!@@@@@ rna 交易 所有的 gas 需要在 amount 里面单独扣除
-                    let gas_amount = row.get::<u64, &str>("gas_amount").unwrap_or(0);
-                    if trade.amount < gas_amount {
-                        log::error!("error row {:?}", row);
-                    } else {
-                        trade.amount -= gas_amount;
-                    }
-                }
                 if import_trade(asset as u32, Cow::from(tid.clone()), trade) {
                     return Ok(true);
                 }
@@ -78,7 +70,7 @@ pub fn load_mysql_row(row: mysql::Row)-> Result<bool> {
             TransferType::Gas=> {
                 let from = row.get::<String, &str>("from_address").ok_or(anyhow!("no from_address"))?;
                 let to = row.get::<String, &str>("to_address").ok_or(anyhow!("no to_address"))?;
-                let mut trade = Trade::pay(Cow::from(from), Cow::from(to), amount, Vec::new(), Cow::from(hash));
+                let mut trade = Trade::gas(Cow::from(from), Cow::from(to), amount);
                 trade.update_tick = updated;
                 trade.create_tick = created;
                 trade.status = status;

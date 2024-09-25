@@ -208,7 +208,7 @@ pub(crate) async fn add_trade(asset: u32, trade_id: StaticStr, trade: Trade) {  
                 account_modify(&trade.to, |account| account.income(asset as usize, trade.amount) ).await;
             }
         }
-        TransferType::Pay=> {
+        TransferType::Pay | TransferType::Gas=> {
             account_add(trade.from.clone(), asset, trade_id.clone(), None).await;
             account_add(trade.to.clone(), asset, trade_id.clone(), None).await;
             if trade.status == TransferStatus::Succeeded {
