@@ -48,7 +48,7 @@ pub fn load_mysql_row(row: mysql::Row)-> Result<bool> {
             TransferType::Fund=> {
                 let from = row.get::<String, &str>("from_address").ok_or(anyhow!("no from_address"))?.trim().to_string();      //这个是存入的地址 我的天啊!@!!@!!
                 let to = row.get::<String, &str>("to_address").ok_or(anyhow!("no to_address"))?.trim().to_string();            //这个没有使用
-                let mut trade = Trade::fund(Cow::from(to), Cow::from(from), amount, Cow::from(hash));
+                let mut trade = Trade::fund(Cow::from(to), Cow::from(from), amount, Vec::new(), Cow::from(hash));
                 trade.update_tick = updated;
                 trade.create_tick = created;
                 trade.status = status;
