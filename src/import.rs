@@ -70,23 +70,20 @@ pub fn load_mysql_row(row: mysql::Row)-> Result<bool> {
             TransferType::Gas=> {
                 let from = row.get::<String, &str>("from_address").ok_or(anyhow!("no from_address"))?.trim().to_string();
                 let to = Cow::from(row.get::<String, &str>("to_address").ok_or(anyhow!("no to_address"))?.trim().to_string());
-                if tid.ends_with("_RNA") {          //手续费收入
+                if tid.ends_with("_RNA") {          //手续费 RNA的手续费需要合并到 Pay 订单中
                     let trade_id = Cow::from(tid.replace("_RNA", "_0"));
                     if trade::update_trade(&trade_id, |trade| {
                         trade.gas.push(GasInfo::new(asset as u32, amount, Cow::from(Cow::from(to.clone()))));
                     }) {
                         return Ok(true);
-                    } else {
-                        log::error!("no trade_id {}", trade_id);
-                    }
-                } else {
-                    let mut trade = Trade::gas(Cow::from(from), to, amount);
-                    trade.update_tick = updated;
-                    trade.create_tick = created;
-                    trade.status = status;
-                    if import_trade(asset as u32, Cow::from(tid.clone()), trade) {
-                        return Ok(true);
-                    }
+                    } 
+                }
+                let mut trade = Trade::gas(Cow::from(from), to, amount);
+                trade.update_tick = updated;
+                trade.create_tick = created;
+                trade.status = status;
+                if import_trade(asset as u32, Cow::from(tid.clone()), trade) {
+                    return Ok(true);
                 }
             }
             TransferType::Withdraw=> {

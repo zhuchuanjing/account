@@ -103,7 +103,7 @@ async fn account_success(asset: u32, trade: &Trade, with_lock: bool)-> bool {   
         if with_lock {
             account.confirm(asset as usize, &trade)
         } else {
-            account.decrease(asset as usize, &trade).map_err(|e| {
+            let _ = account.decrease(asset as usize, &trade).map_err(|e| {
                 log::error!("err {:?} {:?}", e, trade);
                 let _ = WARNINGS.insert((asset, trade.from.clone()));
             });
