@@ -116,6 +116,8 @@ pub static GAS_RECEIVE_ADDR: &'static str = "bc1qljz0dldnml3y897n68jxtnycyy62szl
 
 pub static ASSET_JERRY: u32 = 5;
 pub static ASSET_RNA: u32 = 2;
+pub static ASSET_BTC: u32 = 0;
+
 
 pub static TRADES: Lazy<Vec<Arc<TradeManager>>> = Lazy::new(|| {
     let pool = Arc::new(LinearObjectPool::<Connection>::new(move || {
