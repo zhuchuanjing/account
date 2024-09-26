@@ -81,9 +81,9 @@ impl Trade {
         Self{r#type: TransferType::Pay, status: TransferStatus::Pending, create_tick: chrono::Utc::now().timestamp(), update_tick: 0,
             amount, gas, from, to, hash, from_node: None, to_node: None, channel: None}
     }
-    pub fn fund(from: StaticStr, to: StaticStr, amount: u64, hash: StaticStr)-> Self {  //充值订单 没有手续费 目的地是平台地址
+    pub fn fund(from: StaticStr, to: StaticStr, amount: u64, gas: Vec<GasInfo>, hash: StaticStr)-> Self {  //充值订单 没有手续费 目的地是平台地址
         Self{r#type: TransferType::Fund, status: TransferStatus::WaitBroadcast, create_tick: chrono::Utc::now().timestamp(), update_tick: 0,
-            amount, gas: Vec::new(), from, to, hash, from_node: None, to_node: None, channel: None}
+            amount, gas, from, to, hash, from_node: None, to_node: None, channel: None}
     }
     pub fn withdraw(from: StaticStr, to: StaticStr, amount: u64, gas: Vec<GasInfo>, hash: StaticStr)-> Self {   //生成 withdraw 交易 之前是需要分别生成 交易 rna 手续费 其他手续费三条订单记录 现在放在一条订单里面
         Self{r#type: TransferType::Withdraw, status: TransferStatus::Pending, create_tick: chrono::Utc::now().timestamp(), update_tick: 0,
