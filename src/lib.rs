@@ -146,9 +146,9 @@ pub async fn get_trades(asset: u32, account: &StaticStr, descend: bool)-> Vec<(S
     trades
 }
 
-pub async fn add_fund(asset: u32, trade_id: StaticStr, from: StaticStr, to: StaticStr, amount: u64, hash: StaticStr)-> Result<()> {
+pub async fn add_fund(asset: u32, trade_id: StaticStr, from: StaticStr, to: StaticStr, amount: u64, gas: Vec<GasInfo>, hash: StaticStr)-> Result<()> {
     if TRADES[asset as usize].contains(&trade_id).await { return Err(anyhow!("trade {} existed", trade_id )); }
-    let trade = Trade::fund(from, to.clone(), amount, hash);
+    let trade = Trade::fund(from, to.clone(), amount, gas, hash);
     let _ = TRADES[asset as usize].insert(trade_id.clone(), trade.clone()).await;
     account_add(to, asset, trade_id, None).await;
     Ok(())
