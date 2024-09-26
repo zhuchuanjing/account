@@ -53,15 +53,19 @@ impl Account {
         self.amounts[asset].0 += amount;
         true
     }
-    pub fn decrease(&mut self, asset: usize, trade: &Trade)-> bool {      //减少 asset 仅用于重新加载的时候 没有锁定直接减少
+    pub fn decrease(&mut self, asset: usize, trade: &Trade)-> Result<()> {      //减少 asset 仅用于重新加载的时候 没有锁定直接减少
         if self.amounts[asset].0 < trade.amount {
-            return false;
+            return Err(anyhow!("asset {} amount {} less than {}", asset, self.amounts[asset].0, trade.amount));
         }
         self.amounts[asset].0 -= trade.amount;
         for g in &trade.gas {
-            self.amounts[g.asset as usize].0 -= g.amount;
+            if self.amounts[g.asset as usize].0 < g.amount {
+                return Err(anyhow!("gas asset {} amount {} less than {}", g.asset, self.amounts[g.asset as usize].0, g.amount));
+            } else {
+                self.amounts[g.asset as usize].0 -= g.amount;
+            }
         }
-       true
+       Ok(())
     }
 }
 
@@ -99,10 +103,10 @@ async fn account_success(asset: u32, trade: &Trade, with_lock: bool)-> bool {   
         if with_lock {
             account.confirm(asset as usize, &trade)
         } else {
-            if !account.decrease(asset as usize, &trade) {
-                log::error!("debit {} {:?}", ASSET_NAMES[asset as usize], trade);
+            account.decrease(asset as usize, &trade).map_err(|e| {
+                log::error!("err {:?} {:?}", e, trade);
                 let _ = WARNINGS.insert((asset, trade.from.clone()));
-            }
+            });
             true
         }
     }).await {

@@ -32,6 +32,12 @@ pub struct GasInfo {
     pub to: StaticStr,
 }
 
+impl GasInfo {
+    pub fn new(asset: u32, amount: u64, to: StaticStr)-> Self {
+        Self{asset, amount, to}
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Trade {
     pub r#type: TransferType,
@@ -124,6 +130,16 @@ pub static TRADES: Lazy<Vec<Arc<TradeManager>>> = Lazy::new(|| {
     trades
 });
 
+pub fn update_trade<F: FnMut(&mut Trade)>(id: &StaticStr, mut f: F)-> bool {
+    for asset in 0..ASSET_NUM {
+        if let Some(mut trade) = TRADES[asset].store.get(id) {
+            f(&mut trade);
+            return TRADES[asset].store.update(id, &trade);
+        }
+    }
+    false
+}
+
 pub struct RedisStore {
     list_key: StaticStr,
     trades_key: StaticStr,
@@ -150,19 +166,19 @@ impl RedisStore {
 
     pub(crate) fn insert(&self, id: &StaticStr, t: &Trade)-> bool {
         let mut c = self.pool.pull();
-        if c.hset(self.trades_key.as_ref(), id, rmp_serde::to_vec(&t).unwrap()).unwrap_or(false) {
+        if c.hset::<&str, &str, Vec<u8>, bool>(self.trades_key.as_ref(), id, rmp_serde::to_vec(&t).unwrap()).is_ok() {
             c.rpush(self.list_key.as_ref(), id).unwrap_or(false)
         } else {
             false
         }
     }
 
-    fn update(&self, id: &StaticStr, value: &Trade)-> bool {       //内存保证多个线程不会同时更新
+    pub(crate) fn update(&self, id: &StaticStr, value: &Trade)-> bool {       //内存保证多个线程不会同时更新
         let mut c = self.pool.pull();
-        c.hset(self.trades_key.as_ref(), id, rmp_serde::to_vec(&value).unwrap()).unwrap_or(false)
+        c.hset::<&str, &str, Vec<u8>, bool>(self.trades_key.as_ref(), id, rmp_serde::to_vec(&value).unwrap()).is_ok()
     }
 
-    fn get(&self, id: &StaticStr)-> Option<Trade> {
+    pub(crate) fn get(&self, id: &StaticStr)-> Option<Trade> {
         let mut c = self.pool.pull();
         c.hget::<&str, &str, Vec<u8>>(self.trades_key.as_ref(), id).ok().and_then(|buf| rmp_serde::from_slice::<Trade>(&buf).ok() )
     }
